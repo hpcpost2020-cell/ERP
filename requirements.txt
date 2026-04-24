@@ -1,0 +1,10 @@
+django>=5.2
+djangorestframework>=3.17
+djangorestframework-simplejwt>=5.5
+django-cors-headers>=4.9
+django-filter>=25.2
+Pillow>=12.0
+reportlab>=4.4
+python-dateutil>=2.9
+PyJWT>=2.12
+cryptography>=46.0
