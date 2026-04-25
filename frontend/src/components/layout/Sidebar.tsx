@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building2,
-  BarChart3, FileText, RotateCcw, Ship, Settings, BookOpen, Layers, LogOut
+  BarChart3, FileText, RotateCcw, Ship, Settings, BookOpen, Layers,
+  LogOut, CheckSquare, Sliders
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -22,7 +23,9 @@ const nav = [
   { divider: 'Analytics' },
   { label: 'Reports', to: '/reports', icon: BarChart3 },
   { divider: 'System' },
+  { label: 'Tasks', to: '/tasks', icon: CheckSquare },
   { label: 'Users', to: '/users', icon: Settings },
+  { label: 'Settings', to: '/settings', icon: Sliders },
   { label: 'Audit Log', to: '/audit', icon: BookOpen },
 ]
 

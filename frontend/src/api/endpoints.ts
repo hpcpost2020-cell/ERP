@@ -129,3 +129,28 @@ export const users = {
   activate: (id: number) => api.post(`/users/${id}/activate/`),
   deactivate: (id: number) => api.post(`/users/${id}/deactivate/`),
 }
+
+export const settings = {
+  list: (params?: Record<string, unknown>) => api.get('/settings/', { params }),
+  get: (key: string) => api.get(`/settings/${key}/`),
+  create: (data: unknown) => api.post('/settings/', data),
+  update: (key: string, data: unknown) => api.patch(`/settings/${key}/`, data),
+  bulk: (data: Record<string, unknown>) => api.post('/settings/bulk/', { settings: data }),
+  byPrefix: (prefix: string) => api.get('/settings/by-prefix/', { params: { prefix } }),
+}
+
+export const tasks = {
+  list: (params?: Record<string, unknown>) => api.get('/tasks/', { params }),
+  get: (id: number) => api.get(`/tasks/${id}/`),
+  create: (data: unknown) => api.post('/tasks/', data),
+  update: (id: number, data: unknown) => api.patch(`/tasks/${id}/`, data),
+  delete: (id: number) => api.delete(`/tasks/${id}/`),
+  complete: (id: number) => api.post(`/tasks/${id}/complete/`),
+  assign: (id: number, data: unknown) => api.post(`/tasks/${id}/assign/`, data),
+  myTasks: () => api.get('/tasks/my-tasks/'),
+  overdue: () => api.get('/tasks/overdue/'),
+}
+
+export const globalSearch = {
+  search: (q: string, types?: string) => api.get('/settings/search/', { params: { q, types } }),
+}

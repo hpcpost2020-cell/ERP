@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('Admin1234!')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
@@ -52,7 +52,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="text-xs text-gray-400 text-center mt-6">
-          Demo: admin / Admin1234!
+          Sign in with your ERP credentials
         </p>
       </div>
     </div>

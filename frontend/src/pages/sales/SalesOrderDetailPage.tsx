@@ -5,12 +5,14 @@ import { sales, invoicing } from '../../api/endpoints'
 import { fmt } from '../../utils/format'
 import Loading from '../../components/ui/Loading'
 import StatusBadge from '../../components/ui/StatusBadge'
+import { useToast } from '../../components/ui/Toast'
 import { ArrowLeft, Truck, XCircle, FileText, MessageSquare } from 'lucide-react'
 
 export default function SalesOrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
   const qc = useQueryClient()
+  const toast = useToast()
   const orderId = Number(id)
   const [note, setNote] = useState('')
   const [showDispatch, setShowDispatch] = useState(false)
@@ -23,19 +25,23 @@ export default function SalesOrderDetailPage() {
 
   const dispatchMut = useMutation({
     mutationFn: (d: unknown) => sales.dispatch(orderId, d),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); setShowDispatch(false) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); setShowDispatch(false); toast('Order dispatched', 'success') },
+    onError: () => toast('Failed to dispatch order', 'error'),
   })
   const cancelMut = useMutation({
     mutationFn: () => sales.cancel(orderId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['order', orderId] })
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); toast('Order cancelled', 'info') },
+    onError: () => toast('Failed to cancel order', 'error'),
   })
   const addNoteMut = useMutation({
     mutationFn: (content: string) => sales.addNote(orderId, { content, note_type: 'internal' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); setNote('') }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order', orderId] }); setNote(''); toast('Note added', 'success') },
+    onError: () => toast('Failed to add note', 'error'),
   })
   const createInvoiceMut = useMutation({
     mutationFn: () => invoicing.createFromOrder(orderId),
-    onSuccess: (res) => nav(`/invoicing/${res.data.id}`)
+    onSuccess: (res) => { toast('Invoice created', 'success'); nav(`/invoicing/${res.data.id}`) },
+    onError: () => toast('Failed to create invoice', 'error'),
   })
 
   if (isLoading) return <Loading />

@@ -6,12 +6,14 @@ import Loading from '../../components/ui/Loading'
 import SearchBar from '../../components/ui/SearchBar'
 import Pagination from '../../components/ui/Pagination'
 import StatusBadge from '../../components/ui/StatusBadge'
+import CustomerFormModal from './CustomerFormModal'
 import { Plus, Eye } from 'lucide-react'
 
 export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [type, setType] = useState('')
+  const [showNew, setShowNew] = useState(false)
   const nav = useNavigate()
 
   const { data, isLoading } = useQuery({
@@ -25,17 +27,18 @@ export default function CustomersPage() {
     <div className="space-y-4">
       <div className="page-header">
         <div><h1 className="page-title">Customers</h1><p className="page-subtitle">{data?.count || 0} customer records</p></div>
-        <button className="btn-primary" onClick={() => nav('/customers/new')}><Plus className="w-4 h-4" /> New Customer</button>
+        <button className="btn-primary" onClick={() => setShowNew(true)}><Plus className="w-4 h-4" /> New Customer</button>
       </div>
       <div className="card">
         <div className="card-header">
           <div className="flex gap-3">
             <SearchBar value={search} onChange={v => { setSearch(v); setPage(1) }} placeholder="Name, email, phone..." />
-            <select className="select w-36" value={type} onChange={e => setType(e.target.value)}>
+            <select className="select w-36" value={type} onChange={e => { setType(e.target.value); setPage(1) }}>
               <option value="">All Types</option>
               <option value="retail">Retail</option>
               <option value="wholesale">Wholesale</option>
               <option value="marketplace">Marketplace</option>
+              <option value="trade">Trade</option>
             </select>
           </div>
         </div>
@@ -52,7 +55,9 @@ export default function CustomersPage() {
                   <td><span className="badge badge-blue capitalize">{c.customer_type}</span></td>
                   <td>{c.total_orders}</td>
                   <td><StatusBadge status={c.status} /></td>
-                  <td onClick={e => e.stopPropagation()}><button onClick={() => nav(`/customers/${c.id}`)} className="btn btn-secondary btn-sm"><Eye className="w-3 h-3" /></button></td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <button onClick={() => nav(`/customers/${c.id}`)} className="btn btn-secondary btn-sm"><Eye className="w-3 h-3" /></button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -60,6 +65,8 @@ export default function CustomersPage() {
         </div>
         <Pagination page={page} pageSize={50} total={data?.count || 0} onPage={setPage} />
       </div>
+
+      {showNew && <CustomerFormModal onClose={() => setShowNew(false)} />}
     </div>
   )
 }

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { products as productApi } from '../../api/endpoints'
+import { useToast } from '../../components/ui/Toast'
 import { X } from 'lucide-react'
 
 interface Props { id: number | null; onClose: () => void }
 
 export default function ProductModal({ id, onClose }: Props) {
   const qc = useQueryClient()
+  const toast = useToast()
   const isEdit = id !== null
 
   const { data: existing } = useQuery({
@@ -45,7 +47,13 @@ export default function ProductModal({ id, onClose }: Props) {
   const save = useMutation({
     mutationFn: (data: Record<string, string>) =>
       isEdit ? productApi.update(id!, data) : productApi.create(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); onClose() },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] })
+      if (isEdit) qc.invalidateQueries({ queryKey: ['product', id] })
+      toast(isEdit ? 'Product updated' : 'Product created', 'success')
+      onClose()
+    },
+    onError: () => toast('Failed to save product', 'error'),
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {

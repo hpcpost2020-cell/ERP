@@ -5,12 +5,14 @@ import { purchasing } from '../../api/endpoints'
 import { fmt } from '../../utils/format'
 import Loading from '../../components/ui/Loading'
 import StatusBadge from '../../components/ui/StatusBadge'
+import { useToast } from '../../components/ui/Toast'
 import { ArrowLeft, Send, Package, XCircle } from 'lucide-react'
 
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
   const qc = useQueryClient()
+  const toast = useToast()
   const poId = Number(id)
   const [showReceive, setShowReceive] = useState(false)
   const [receiveDate, setReceiveDate] = useState(new Date().toISOString().split('T')[0])
@@ -22,8 +24,16 @@ export default function PurchaseOrderDetailPage() {
 
   const [receiveQtys, setReceiveQtys] = useState<Record<number, number>>({})
 
-  const sendMut = useMutation({ mutationFn: () => purchasing.send(poId), onSuccess: () => qc.invalidateQueries({ queryKey: ['po', poId] }) })
-  const cancelMut = useMutation({ mutationFn: () => purchasing.cancel(poId), onSuccess: () => qc.invalidateQueries({ queryKey: ['po', poId] }) })
+  const sendMut = useMutation({
+    mutationFn: () => purchasing.send(poId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['po', poId] }); toast('PO sent to supplier', 'success') },
+    onError: () => toast('Failed to send PO', 'error'),
+  })
+  const cancelMut = useMutation({
+    mutationFn: () => purchasing.cancel(poId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['po', poId] }); toast('PO cancelled', 'info') },
+    onError: () => toast('Failed to cancel PO', 'error'),
+  })
   const receiveMut = useMutation({
     mutationFn: () => {
       const items = po?.items?.map((item: { id: number }) => ({
@@ -33,7 +43,8 @@ export default function PurchaseOrderDetailPage() {
       })).filter((i: { qty_received: number }) => i.qty_received > 0) || []
       return purchasing.receive(poId, { received_date: receiveDate, items })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['po', poId] }); setShowReceive(false) }
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['po', poId] }); setShowReceive(false); toast('Goods received successfully', 'success') },
+    onError: () => toast('Failed to record receipt', 'error'),
   })
 
   if (isLoading) return <Loading />

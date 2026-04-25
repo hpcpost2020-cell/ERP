@@ -1,23 +1,31 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { ToastProvider } from './components/ui/Toast'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/dashboard/DashboardPage'
 import ProductsPage from './pages/products/ProductsPage'
+import ProductDetailPage from './pages/products/ProductDetailPage'
 import InventoryPage from './pages/products/InventoryPage'
 import SuppliersPage from './pages/suppliers/SuppliersPage'
+import SupplierDetailPage from './pages/suppliers/SupplierDetailPage'
 import PurchasingPage from './pages/purchasing/PurchasingPage'
 import PurchaseOrderDetailPage from './pages/purchasing/PurchaseOrderDetailPage'
+import PurchaseOrderFormPage from './pages/purchasing/PurchaseOrderFormPage'
 import CustomersPage from './pages/customers/CustomersPage'
+import CustomerDetailPage from './pages/customers/CustomerDetailPage'
 import SalesOrdersPage from './pages/sales/SalesOrdersPage'
 import SalesOrderDetailPage from './pages/sales/SalesOrderDetailPage'
+import SalesOrderFormPage from './pages/sales/SalesOrderFormPage'
 import ShippingPage from './pages/shipping/ShippingPage'
 import InvoicingPage from './pages/invoicing/InvoicingPage'
 import ReturnsPage from './pages/returns/ReturnsPage'
 import ReportsPage from './pages/reports/ReportsPage'
 import UsersPage from './pages/users/UsersPage'
 import AuditPage from './pages/audit/AuditPage'
+import SettingsPage from './pages/settings/SettingsPage'
+import TasksPage from './pages/tasks/TasksPage'
 import Loading from './components/ui/Loading'
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30000, retry: 1 } } })
@@ -38,12 +46,17 @@ function AppRoutes() {
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
         <Route path="products" element={<ProductsPage />} />
+        <Route path="products/:id" element={<ProductDetailPage />} />
         <Route path="inventory" element={<InventoryPage />} />
         <Route path="suppliers" element={<SuppliersPage />} />
+        <Route path="suppliers/:id" element={<SupplierDetailPage />} />
         <Route path="purchasing" element={<PurchasingPage />} />
+        <Route path="purchasing/new" element={<PurchaseOrderFormPage />} />
         <Route path="purchasing/:id" element={<PurchaseOrderDetailPage />} />
         <Route path="customers" element={<CustomersPage />} />
+        <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="sales" element={<SalesOrdersPage />} />
+        <Route path="sales/new" element={<SalesOrderFormPage />} />
         <Route path="sales/:id" element={<SalesOrderDetailPage />} />
         <Route path="shipping" element={<ShippingPage />} />
         <Route path="invoicing" element={<InvoicingPage />} />
@@ -51,6 +64,8 @@ function AppRoutes() {
         <Route path="reports" element={<ReportsPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="audit" element={<AuditPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="tasks" element={<TasksPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Route>
     </Routes>
@@ -62,7 +77,9 @@ export default function App() {
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
+          <ToastProvider>
+            <AppRoutes />
+          </ToastProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
