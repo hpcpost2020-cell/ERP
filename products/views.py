@@ -6,11 +6,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
 from django.db.models import Sum, Q
 
-from .models import Category, Product, ChannelListing, StockLocation, StockLevel, StockMovement
+from .models import Category, Product, ChannelListing, StockLocation, StockLevel, StockMovement, UnitOfMeasure, UoMConversion
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductListSerializer,
     StockLocationSerializer, StockLevelSerializer, StockMovementSerializer,
     StockAdjustmentSerializer, ChannelListingSerializer,
+    UnitOfMeasureSerializer, UoMConversionSerializer,
 )
 
 
@@ -95,6 +96,28 @@ class StockLevelViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ['product', 'location']
     search_fields = ['product__sku', 'product__title', 'location__code']
     ordering_fields = ['product__sku', 'qty_on_hand', 'updated_at']
+
+
+class UnitOfMeasureViewSet(viewsets.ModelViewSet):
+    queryset = UnitOfMeasure.objects.select_related('base_unit').all()
+    serializer_class = UnitOfMeasureSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active', 'base_unit']
+    search_fields = ['name', 'abbreviation']
+    ordering_fields = ['name']
+    ordering = ['name']
+
+
+class UoMConversionViewSet(viewsets.ModelViewSet):
+    queryset = UoMConversion.objects.select_related('from_uom', 'to_uom', 'product').all()
+    serializer_class = UoMConversionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['from_uom', 'to_uom', 'product']
+    search_fields = ['from_uom__name', 'to_uom__name', 'product__sku']
+    ordering_fields = ['from_uom__name']
+    ordering = ['from_uom__name']
 
 
 class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):

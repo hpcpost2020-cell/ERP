@@ -9,7 +9,7 @@ from django.utils import timezone
 from .models import PurchaseOrder, PurchaseOrderItem, GoodsReceipt, GoodsReceiptItem, SupplierCreditNote
 from .serializers import (
     PurchaseOrderSerializer, PurchaseOrderListSerializer,
-    GoodsReceiptSerializer, SupplierCreditNoteSerializer
+    GoodsReceiptSerializer, GoodsReceiptItemSerializer, SupplierCreditNoteSerializer
 )
 from products.models import StockLevel, StockMovement
 
@@ -111,6 +111,95 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         po.status = PurchaseOrder.STATUS_CANCELLED
         po.save(update_fields=['status'])
         return Response({'detail': 'PO cancelled.'})
+
+
+class GoodsReceiptViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only viewset for browsing goods receipts. Creation is via PO receive action."""
+    queryset = GoodsReceipt.objects.select_related(
+        'purchase_order', 'received_by'
+    ).prefetch_related('items__po_item__product').all()
+    serializer_class = GoodsReceiptSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['purchase_order']
+    search_fields = ['receipt_number', 'purchase_order__po_number', 'delivery_note_ref']
+    ordering = ['-created_at']
+
+    @action(detail=True, methods=['get'], url_path='qc-pending')
+    def qc_pending(self, request, pk=None):
+        receipt = self.get_object()
+        items = receipt.items.filter(qc_status=GoodsReceiptItem.QC_PENDING).select_related('po_item__product')
+        return Response(GoodsReceiptItemSerializer(items, many=True).data)
+
+
+class GoodsReceiptItemViewSet(viewsets.ReadOnlyModelViewSet):
+    """QC workflow endpoints for individual goods receipt items."""
+    queryset = GoodsReceiptItem.objects.select_related(
+        'goods_receipt__purchase_order', 'po_item__product', 'qc_checked_by'
+    ).all()
+    serializer_class = GoodsReceiptItemSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['qc_status', 'goods_receipt']
+    search_fields = ['po_item__product__sku', 'po_item__product__title', 'goods_receipt__receipt_number']
+    ordering = ['-goods_receipt__created_at']
+
+    @action(detail=False, methods=['get'], url_path='pending')
+    def pending(self, request):
+        """List all items awaiting QC across all receipts."""
+        items = GoodsReceiptItem.objects.filter(
+            qc_status=GoodsReceiptItem.QC_PENDING
+        ).select_related('goods_receipt__purchase_order', 'po_item__product')
+        return Response(GoodsReceiptItemSerializer(items, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='qc-pass')
+    def qc_pass(self, request, pk=None):
+        item = self.get_object()
+        if item.qc_status == GoodsReceiptItem.QC_PASSED:
+            return Response({'detail': 'Item already passed QC.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            item.qc_status = GoodsReceiptItem.QC_PASSED
+            item.qc_checked_by = request.user
+            item.qc_checked_at = timezone.now()
+            item.qc_notes = request.data.get('qc_notes', '')
+            item.qc_fail_reason = ''
+            item.save(update_fields=['qc_status', 'qc_checked_by', 'qc_checked_at', 'qc_notes', 'qc_fail_reason'])
+        from audit.utils import log_action
+        log_action(request, 'update', 'GoodsReceiptItem', str(item.pk),
+                   f"QC Pass: {item.po_item.product.sku} in {item.goods_receipt.receipt_number}", {})
+        return Response(GoodsReceiptItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'], url_path='qc-fail')
+    def qc_fail(self, request, pk=None):
+        item = self.get_object()
+        qc_fail_reason = request.data.get('qc_fail_reason', '')
+        if not qc_fail_reason:
+            return Response({'detail': 'qc_fail_reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            item.qc_status = GoodsReceiptItem.QC_FAILED
+            item.qc_checked_by = request.user
+            item.qc_checked_at = timezone.now()
+            item.qc_fail_reason = qc_fail_reason
+            item.qc_notes = request.data.get('qc_notes', '')
+            item.save(update_fields=['qc_status', 'qc_checked_by', 'qc_checked_at', 'qc_fail_reason', 'qc_notes'])
+        from audit.utils import log_action
+        log_action(request, 'update', 'GoodsReceiptItem', str(item.pk),
+                   f"QC Fail: {item.po_item.product.sku} — {qc_fail_reason}", {})
+        return Response(GoodsReceiptItemSerializer(item).data)
+
+    @action(detail=True, methods=['post'], url_path='qc-quarantine')
+    def qc_quarantine(self, request, pk=None):
+        item = self.get_object()
+        with transaction.atomic():
+            item.qc_status = GoodsReceiptItem.QC_QUARANTINED
+            item.qc_checked_by = request.user
+            item.qc_checked_at = timezone.now()
+            item.qc_notes = request.data.get('qc_notes', '')
+            item.save(update_fields=['qc_status', 'qc_checked_by', 'qc_checked_at', 'qc_notes'])
+        from audit.utils import log_action
+        log_action(request, 'update', 'GoodsReceiptItem', str(item.pk),
+                   f"QC Quarantine: {item.po_item.product.sku} in {item.goods_receipt.receipt_number}", {})
+        return Response(GoodsReceiptItemSerializer(item).data)
 
 
 class SupplierCreditNoteViewSet(viewsets.ModelViewSet):

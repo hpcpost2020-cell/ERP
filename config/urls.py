@@ -21,6 +21,10 @@ urlpatterns = [
     path('api/returns/', include('returns.urls')),
     path('api/audit/', include('audit.urls')),
     path('api/reports/', include('reporting.urls')),
+    path('api/wms/', include('wms.urls')),
+    path('api/tasks/', include('tasks.urls')),
+    path('api/custom-modules/', include('custom_modules.urls')),
+    path('api/settings/', include('core.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # Serve React SPA

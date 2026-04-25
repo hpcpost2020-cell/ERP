@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Category, Product, ChannelListing, StockLocation, StockLevel, StockMovement
+from .models import Category, Product, ChannelListing, StockLocation, StockLevel, StockMovement, UnitOfMeasure, UoMConversion
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -131,3 +131,41 @@ class ProductListSerializer(serializers.ModelSerializer):
             'low_stock_threshold', 'created_at',
         ]
         read_only_fields = ['id', 'created_at']
+
+
+# ── Unit of Measure ───────────────────────────────────────────────────────────
+
+class UnitOfMeasureSerializer(serializers.ModelSerializer):
+    base_unit_name = serializers.CharField(source='base_unit.name', read_only=True, allow_null=True)
+    derived_units_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UnitOfMeasure
+        fields = ['id', 'name', 'abbreviation', 'base_unit', 'base_unit_name', 'is_active', 'derived_units_count']
+        read_only_fields = ['id']
+
+    def get_derived_units_count(self, obj):
+        return obj.derived_units.count()
+
+
+class UoMConversionSerializer(serializers.ModelSerializer):
+    from_uom_name = serializers.CharField(source='from_uom.name', read_only=True)
+    from_uom_abbr = serializers.CharField(source='from_uom.abbreviation', read_only=True)
+    to_uom_name = serializers.CharField(source='to_uom.name', read_only=True)
+    to_uom_abbr = serializers.CharField(source='to_uom.abbreviation', read_only=True)
+    product_sku = serializers.CharField(source='product.sku', read_only=True, allow_null=True)
+    display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UoMConversion
+        fields = [
+            'id', 'from_uom', 'from_uom_name', 'from_uom_abbr',
+            'to_uom', 'to_uom_name', 'to_uom_abbr',
+            'product', 'product_sku',
+            'conversion_factor', 'display',
+        ]
+        read_only_fields = ['id']
+
+    def get_display(self, obj):
+        product_str = f" ({obj.product.sku})" if obj.product else " (global)"
+        return f"1 {obj.from_uom.abbreviation} = {obj.conversion_factor} {obj.to_uom.abbreviation}{product_str}"

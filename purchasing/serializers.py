@@ -10,21 +10,30 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseOrderItem
-        fields = ['id', 'purchase_order', 'product', 'product_sku', 'product_title',
-                  'supplier_sku', 'description', 'qty_ordered', 'qty_received', 'qty_damaged',
-                  'unit_cost', 'qty_outstanding', 'line_total', 'notes']
+        fields = [
+            'id', 'purchase_order', 'product', 'product_sku', 'product_title',
+            'supplier_sku', 'description', 'qty_ordered', 'qty_received', 'qty_damaged',
+            'unit_cost', 'landed_unit_cost', 'qty_outstanding', 'line_total', 'notes',
+        ]
         read_only_fields = ['id', 'purchase_order']
 
 
 class GoodsReceiptItemSerializer(serializers.ModelSerializer):
     product_sku = serializers.CharField(source='po_item.product.sku', read_only=True)
     product_title = serializers.CharField(source='po_item.product.title', read_only=True)
+    product_barcode = serializers.CharField(source='po_item.product.barcode', read_only=True)
+    qc_checked_by_name = serializers.CharField(source='qc_checked_by.get_full_name', read_only=True, allow_null=True)
+    is_available_for_stock = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = GoodsReceiptItem
-        fields = ['id', 'po_item', 'product_sku', 'product_title',
-                  'qty_received', 'qty_damaged', 'notes']
-        read_only_fields = ['id']
+        fields = [
+            'id', 'po_item', 'product_sku', 'product_title', 'product_barcode',
+            'qty_received', 'qty_damaged', 'notes',
+            'qc_status', 'qc_checked_by', 'qc_checked_by_name',
+            'qc_checked_at', 'qc_notes', 'qc_fail_reason', 'is_available_for_stock',
+        ]
+        read_only_fields = ['id', 'qc_checked_by', 'qc_checked_at', 'is_available_for_stock']
 
 
 class GoodsReceiptSerializer(serializers.ModelSerializer):
@@ -35,7 +44,7 @@ class GoodsReceiptSerializer(serializers.ModelSerializer):
         model = GoodsReceipt
         fields = ['id', 'purchase_order', 'receipt_number', 'received_date',
                   'delivery_note_ref', 'notes', 'items', 'received_by', 'received_by_name', 'created_at']
-        read_only_fields = ['id', 'receipt_number', 'created_at', 'received_by']
+        read_only_fields = ['id', 'receipt_number', 'created_at', 'received_by', 'purchase_order']
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')
@@ -52,9 +61,11 @@ class PurchaseOrderListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseOrder
-        fields = ['id', 'po_number', 'supplier', 'supplier_name', 'status',
-                  'order_date', 'expected_delivery_date', 'total_value', 'items_count',
-                  'payment_terms', 'created_at']
+        fields = [
+            'id', 'po_number', 'supplier', 'supplier_name', 'status',
+            'order_date', 'expected_delivery_date', 'total_value', 'items_count',
+            'payment_terms', 'currency', 'created_at',
+        ]
         read_only_fields = ['id', 'po_number', 'created_at']
 
     def get_items_count(self, obj):
@@ -69,15 +80,21 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
     goods_receipts = GoodsReceiptSerializer(many=True, read_only=True)
 
+    total_landed_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    total_additional_charges = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
     class Meta:
         model = PurchaseOrder
-        fields = ['id', 'po_number', 'supplier', 'supplier_name', 'status',
-                  'order_date', 'expected_delivery_date', 'actual_delivery_date',
-                  'payment_terms', 'currency', 'delivery_address', 'supplier_reference',
-                  'notes', 'internal_notes', 'is_overdue',
-                  'total_value', 'total_received_value',
-                  'items', 'goods_receipts',
-                  'created_by', 'created_by_name', 'approved_by', 'created_at', 'updated_at']
+        fields = [
+            'id', 'po_number', 'supplier', 'supplier_name', 'status',
+            'order_date', 'expected_delivery_date', 'actual_delivery_date',
+            'payment_terms', 'currency', 'exchange_rate', 'delivery_address', 'supplier_reference',
+            'freight_cost', 'import_duty', 'other_charges',
+            'notes', 'internal_notes', 'is_overdue',
+            'total_value', 'total_received_value', 'total_additional_charges', 'total_landed_cost',
+            'items', 'goods_receipts',
+            'created_by', 'created_by_name', 'approved_by', 'created_at', 'updated_at',
+        ]
         read_only_fields = ['id', 'po_number', 'created_at', 'updated_at', 'created_by']
 
     def create(self, validated_data):
