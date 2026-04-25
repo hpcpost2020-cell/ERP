@@ -32,6 +32,9 @@ INSTALLED_APPS = [
     'audit',
     'reporting',
     'core',
+    'wms',
+    'tasks',
+    'custom_modules',
 ]
 
 MIDDLEWARE = [

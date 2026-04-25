@@ -45,6 +45,14 @@ class PurchaseOrder(models.Model):
     actual_delivery_date = models.DateField(null=True, blank=True)
     payment_terms = models.CharField(max_length=20, blank=True)
     currency = models.CharField(max_length=3, default='GBP')
+    exchange_rate = models.DecimalField(
+        max_digits=10, decimal_places=6, default=Decimal('1.000000'),
+        help_text='Exchange rate to GBP at time of order'
+    )
+    # Landed cost components (added on top of product unit costs)
+    freight_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    import_duty = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    other_charges = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     delivery_address = models.TextField(blank=True)
     supplier_reference = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
@@ -95,6 +103,24 @@ class PurchaseOrder(models.Model):
     def is_fully_received(self):
         return all(item.qty_received >= item.qty_ordered for item in self.items.all())
 
+    @property
+    def total_additional_charges(self):
+        return self.freight_cost + self.import_duty + self.other_charges
+
+    @property
+    def total_landed_cost(self):
+        """Total value including exchange rate conversion and all additional charges."""
+        goods_value = self.total_value * self.exchange_rate
+        return goods_value + self.total_additional_charges
+
+    @property
+    def landed_cost_per_unit_overhead(self):
+        """Additional charges spread per unit ordered (for landed cost calculation)."""
+        total_units = sum(item.qty_ordered for item in self.items.all())
+        if total_units > 0:
+            return self.total_additional_charges / total_units
+        return Decimal('0.00')
+
 
 class PurchaseOrderItem(models.Model):
     purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
@@ -105,6 +131,10 @@ class PurchaseOrderItem(models.Model):
     qty_received = models.IntegerField(default=0)
     qty_damaged = models.IntegerField(default=0)
     unit_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    landed_unit_cost = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Calculated on receipt: unit_cost + prorated freight/duty/charges'
+    )
     notes = models.CharField(max_length=255, blank=True)
 
     class Meta:
@@ -156,14 +186,40 @@ class GoodsReceipt(models.Model):
 
 
 class GoodsReceiptItem(models.Model):
+    QC_PENDING = 'pending'
+    QC_PASSED = 'passed'
+    QC_FAILED = 'failed'
+    QC_QUARANTINED = 'quarantined'
+
+    QC_CHOICES = [
+        (QC_PENDING, 'Pending QC'),
+        (QC_PASSED, 'Passed QC'),
+        (QC_FAILED, 'Failed QC'),
+        (QC_QUARANTINED, 'Quarantined'),
+    ]
+
     goods_receipt = models.ForeignKey(GoodsReceipt, on_delete=models.CASCADE, related_name='items')
     po_item = models.ForeignKey(PurchaseOrderItem, on_delete=models.CASCADE, related_name='receipt_items')
     qty_received = models.PositiveIntegerField()
     qty_damaged = models.PositiveIntegerField(default=0)
     notes = models.CharField(max_length=255, blank=True)
+    # QC workflow fields
+    qc_status = models.CharField(max_length=20, choices=QC_CHOICES, default=QC_PENDING)
+    qc_checked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='qc_checked_items'
+    )
+    qc_checked_at = models.DateTimeField(null=True, blank=True)
+    qc_notes = models.TextField(blank=True)
+    qc_fail_reason = models.CharField(max_length=255, blank=True)
 
     def __str__(self):
         return f"{self.goods_receipt}: {self.po_item.product.sku} x{self.qty_received}"
+
+    @property
+    def is_available_for_stock(self):
+        """Stock is only counted as available once QC has passed."""
+        return self.qc_status == self.QC_PASSED
 
 
 class SupplierCreditNote(models.Model):

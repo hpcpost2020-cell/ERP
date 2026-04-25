@@ -51,6 +51,16 @@ class Product(models.Model):
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
         related_name='created_products'
     )
+    purchase_uom = models.ForeignKey(
+        'UnitOfMeasure', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='purchased_products',
+        help_text='Unit used when ordering from supplier (e.g. Case, Pallet)'
+    )
+    sale_uom = models.ForeignKey(
+        'UnitOfMeasure', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='sold_products',
+        help_text='Unit used when selling to customers (e.g. Each)'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -188,3 +198,49 @@ class StockMovement(models.Model):
 
     def __str__(self):
         return f"{self.movement_type} {self.quantity} x {self.product.sku} on {self.created_at.date()}"
+
+
+class UnitOfMeasure(models.Model):
+    """Defines units such as Each, Case, Pallet, Kg, Litre."""
+    name = models.CharField(max_length=50, unique=True)
+    abbreviation = models.CharField(max_length=10, unique=True)
+    base_unit = models.ForeignKey(
+        'self', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='derived_units',
+        help_text='Leave blank if this is a base unit (e.g. Each)'
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Unit of Measure'
+        verbose_name_plural = 'Units of Measure'
+
+    def __str__(self):
+        return f"{self.name} ({self.abbreviation})"
+
+
+class UoMConversion(models.Model):
+    """
+    Defines how many [to_uom] are in 1 [from_uom].
+    e.g. 1 Pallet = 48 Cases  →  from=Pallet, to=Case, factor=48
+    Product-specific conversions override global ones when product is set.
+    """
+    from_uom = models.ForeignKey(UnitOfMeasure, on_delete=models.CASCADE, related_name='conversions_from')
+    to_uom = models.ForeignKey(UnitOfMeasure, on_delete=models.CASCADE, related_name='conversions_to')
+    product = models.ForeignKey(
+        Product, null=True, blank=True, on_delete=models.CASCADE,
+        related_name='uom_conversions',
+        help_text='Leave blank for a global conversion applicable to all products'
+    )
+    conversion_factor = models.DecimalField(
+        max_digits=14, decimal_places=6,
+        help_text='1 [from_uom] = [conversion_factor] [to_uom]'
+    )
+
+    class Meta:
+        unique_together = ['from_uom', 'to_uom', 'product']
+
+    def __str__(self):
+        product_str = f" ({self.product.sku})" if self.product else " (global)"
+        return f"1 {self.from_uom.abbreviation} = {self.conversion_factor} {self.to_uom.abbreviation}{product_str}"

@@ -70,3 +70,44 @@ class ChannelSyncLog(models.Model):
 
     def __str__(self):
         return f"{self.channel.name} {self.sync_type} {self.status} @ {self.started_at}"
+
+
+class MarketplaceOrder(models.Model):
+    """Staging table for orders fetched from external marketplaces before import into SalesOrder."""
+    STATUS_PENDING = 'pending'
+    STATUS_IMPORTED = 'imported'
+    STATUS_FAILED = 'failed'
+    STATUS_DUPLICATE = 'duplicate'
+    STATUS_IGNORED = 'ignored'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending Import'),
+        (STATUS_IMPORTED, 'Imported'),
+        (STATUS_FAILED, 'Import Failed'),
+        (STATUS_DUPLICATE, 'Duplicate'),
+        (STATUS_IGNORED, 'Ignored'),
+    ]
+
+    channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name='marketplace_orders')
+    external_order_id = models.CharField(max_length=255)
+    external_order_number = models.CharField(max_length=255, blank=True)
+    raw_data = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    error_message = models.TextField(blank=True)
+    sales_order = models.ForeignKey(
+        'sales.SalesOrder', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='marketplace_source'
+    )
+    fetched_at = models.DateTimeField(auto_now_add=True)
+    imported_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-fetched_at']
+        unique_together = ['channel', 'external_order_id']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['channel', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.channel.name}: {self.external_order_id} ({self.get_status_display()})"
