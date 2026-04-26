@@ -105,15 +105,20 @@ class ChannelListing(models.Model):
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES)
     external_id = models.CharField(max_length=255, blank=True)
     external_sku = models.CharField(max_length=255, blank=True)
+    # For WooCommerce product variations: external_id = variation ID, parent_id = parent product ID.
+    # Empty for simple (non-variable) products.
+    parent_id = models.CharField(max_length=255, blank=True, default='')
     channel_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    is_active = models.BooleanField(default=True)
+    # is_active controls whether stock is pushed to this channel listing.
+    # Auto-created listings start as False; user must confirm before stock syncs.
+    is_active = models.BooleanField(default=False)
     last_synced = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ['product', 'channel', 'external_id']
 
     def __str__(self):
-        return f"{self.product.sku} on {self.channel}"
+        return f"{self.product.sku} on {self.channel} (ext:{self.external_id})"
 
 
 class StockLocation(models.Model):

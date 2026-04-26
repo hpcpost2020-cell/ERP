@@ -145,9 +145,15 @@ export const channels = {
   sync: (id: number) => api.post(`/channels/${id}/sync/`),
   syncOrders: (id: number) => api.post(`/channels/${id}/sync-orders/`),
   pushStock: (id: number) => api.post(`/channels/${id}/push-stock/`),
-  pushTracking: (id: number, orderId: number) => api.post(`/channels/${id}/push-tracking/`, { order_id: orderId }),
+  pushTracking: (id: number, data: unknown) => api.post(`/channels/${id}/push-tracking/`, data),
   syncLogs: (id: number) => api.get(`/channels/${id}/sync-logs/`),
   marketplaceOrders: (id: number) => api.get(`/channels/${id}/marketplace-orders/`),
+  skuMappings: (id: number) => api.get(`/channels/${id}/sku-mappings/`),
+  createSkuMapping: (id: number, data: unknown) => api.post(`/channels/${id}/sku-mappings/`, data),
+  updateSkuMapping: (id: number, data: unknown) => api.patch(`/channels/${id}/sku-mapping/`, data),
+  deleteSkuMapping: (id: number, listingId: number) =>
+    api.delete(`/channels/${id}/sku-mapping/`, { data: { listing_id: listingId } }),
+  unmatchedOrders: (id: number) => api.get(`/channels/${id}/unmatched-orders/`),
 }
 
 export const users = {

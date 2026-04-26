@@ -36,6 +36,25 @@ class MarketplaceOrderSerializer(serializers.ModelSerializer):
         return obj.sales_order.order_number if obj.sales_order_id else None
 
 
+class ChannelListingDetailSerializer(serializers.Serializer):
+    """Read serializer for ChannelListing with enriched product info."""
+    id = serializers.IntegerField()
+    product = serializers.IntegerField(source='product_id')
+    product_sku = serializers.CharField(source='product.sku')
+    product_title = serializers.CharField(source='product.title')
+    channel = serializers.CharField()
+    external_id = serializers.CharField()
+    parent_id = serializers.CharField()
+    external_sku = serializers.CharField()
+    channel_price = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    is_active = serializers.BooleanField()
+    last_synced = serializers.DateTimeField(allow_null=True)
+    is_variation = serializers.SerializerMethodField()
+
+    def get_is_variation(self, obj):
+        return bool(obj.parent_id)
+
+
 class ChannelSerializer(serializers.ModelSerializer):
     sync_logs = ChannelSyncLogSerializer(many=True, read_only=True)
     credentials_summary = serializers.SerializerMethodField()
@@ -48,7 +67,7 @@ class ChannelSerializer(serializers.ModelSerializer):
             'auto_import_orders', 'auto_update_stock', 'notes',
             'sync_logs', 'created_at',
             'credentials_summary',
-            'api_credentials',  # write-only (see extra_kwargs)
+            'api_credentials',  # write-only — see extra_kwargs
         ]
         read_only_fields = ['id', 'created_at', 'last_synced', 'credentials_summary']
         extra_kwargs = {'api_credentials': {'write_only': True, 'required': False}}
