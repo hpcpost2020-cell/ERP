@@ -288,31 +288,69 @@ class ChannelViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='push-stock')
     def push_stock(self, request, pk=None):
-        """Push stock for CONFIRMED (is_active=True) ChannelListings only."""
+        """
+        Push stock for CONFIRMED (is_active=True) ChannelListings only.
+        Query param: ?dry_run=true — calculates and logs what would be pushed, makes no API calls.
+        """
         channel = self.get_object()
+        dry_run = request.query_params.get('dry_run', '').lower() in ('1', 'true', 'yes')
         log = _make_log(channel, 'push_stock')
         try:
             if channel.channel_type == Channel.TYPE_EBAY:
                 from .sync import push_stock_to_ebay
-                stats = push_stock_to_ebay(channel)
+                stats = push_stock_to_ebay(channel, dry_run=dry_run)
             else:
                 from .sync import push_stock_to_woocommerce
                 stats = push_stock_to_woocommerce(channel)
+
+            if dry_run:
+                preview_lines = [
+                    f"  {p['erp_sku']} → eBay SKU {p['ebay_sku']} qty={p['qty']}"
+                    for p in stats.get('preview', [])
+                ] or ['  (no confirmed active mappings with an eBay inventory SKU)']
+                msg = (
+                    f"DRY RUN — {stats['success']} listing(s) would be updated:\n"
+                    + '\n'.join(preview_lines)
+                    + (f"\n{stats['skipped']} skipped (no external_sku set)." if stats['skipped'] else '')
+                    + (f"\n{stats['not_confirmed']} mappings awaiting activation." if stats.get('not_confirmed') else '')
+                    + '\nNo changes were made to eBay.'
+                )
+                log.status = 'completed'
+                log.message = msg
+                log.completed_at = timezone.now()
+                log.records_processed = stats['success']
+                log.save()
+                return Response({**ChannelSyncLogSerializer(log).data, 'dry_run': True, 'preview': stats.get('preview', [])})
+
             parts = [f"{stats['success']} updated"]
-            if stats['failed']:
+            if stats.get('failed'):
                 parts.append(f"{stats['failed']} failed")
-            if stats['skipped']:
-                parts.append(f"{stats['skipped']} skipped (bad ID)")
+            if stats.get('legacy'):
+                parts.append(f"{stats['legacy']} legacy listing(s) skipped (not in Inventory API)")
+            if stats.get('skipped'):
+                parts.append(f"{stats['skipped']} skipped (no eBay inventory SKU set)")
             if stats.get('not_confirmed'):
                 parts.append(
-                    f"{stats['not_confirmed']} awaiting SKU confirmation (use SKU Mapping tab)"
+                    f"{stats['not_confirmed']} awaiting SKU confirmation (activate in SKU Mapping tab)"
                 )
             msg = "Stock: " + ", ".join(parts) + "."
+
+            # Append detailed error list if any failures
+            errors = stats.get('errors', [])
+            if errors:
+                error_lines = []
+                for e in errors[:20]:  # cap at 20 to keep log readable
+                    prefix = '[LEGACY] ' if e.get('legacy') else '[ERROR] '
+                    error_lines.append(f"  {prefix}{e['erp_sku']} (eBay: {e['ebay_sku']}): {e['error']}")
+                msg += '\n\nDetails:\n' + '\n'.join(error_lines)
+                if len(errors) > 20:
+                    msg += f'\n  … and {len(errors) - 20} more.'
+
             _complete_log(
                 log,
-                records_processed=stats['success'] + stats['failed'] + stats['skipped'],
+                records_processed=stats['success'] + stats.get('failed', 0) + stats.get('skipped', 0),
                 records_updated=stats['success'],
-                records_failed=stats['failed'],
+                records_failed=stats.get('failed', 0),
                 message=msg,
             )
             return Response(ChannelSyncLogSerializer(log).data)

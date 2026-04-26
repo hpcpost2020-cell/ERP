@@ -5,10 +5,10 @@ import { channels as channelsApi } from '../../api/endpoints'
 import {
   ArrowLeft, RefreshCw, CheckCircle2, AlertTriangle, Wifi, WifiOff,
   Save, ExternalLink, Package, ChevronRight, Clock, Download, Upload,
-  Truck, Link2, Tag
+  Truck, Link2, Tag, BookOpen, FlaskConical
 } from 'lucide-react'
 
-type Tab = 'overview' | 'credentials' | 'skus' | 'unmatched' | 'logs' | 'tracking'
+type Tab = 'overview' | 'credentials' | 'skus' | 'unmatched' | 'logs' | 'tracking' | 'guide'
 
 interface CredentialsSummary {
   // WooCommerce
@@ -177,6 +177,273 @@ function timeAgo(iso: string | null): string {
   const h = Math.floor(m / 60)
   if (h < 24) return `${h}h ago`
   return `${Math.floor(h / 24)}d ago`
+}
+
+// ── eBay Live Test Guide ──────────────────────────────────────────────────────
+
+interface GuideStep {
+  num: number
+  title: string
+  done: boolean
+  action?: string
+  tab?: Tab
+  details: React.ReactNode
+  warning?: React.ReactNode
+}
+
+function StepRow({ step, onGotoTab }: { step: GuideStep; onGotoTab: (t: Tab) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`border rounded-xl overflow-hidden ${step.done ? 'border-green-200 bg-green-50/40' : 'border-gray-200 bg-white'}`}>
+      <button
+        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${step.done ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+          {step.done ? <CheckCircle2 className="w-4 h-4" /> : step.num}
+        </span>
+        <span className={`flex-1 text-sm font-semibold ${step.done ? 'text-green-800' : 'text-gray-800'}`}>{step.title}</span>
+        {step.tab && !step.done && (
+          <button
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-0.5 border border-blue-200 rounded-full"
+            onClick={e => { e.stopPropagation(); onGotoTab(step.tab!) }}
+          >
+            {step.action || 'Go →'}
+          </button>
+        )}
+        <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-2 border-t border-gray-100 pt-3">
+          <div className="text-sm text-gray-600 space-y-1">{step.details}</div>
+          {step.warning && (
+            <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{step.warning}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EbayGuideTab({ cs, channel, onGotoTab }: {
+  cs: CredentialsSummary
+  channel: { status: string; last_synced: string | null }
+  onGotoTab: (t: Tab) => void
+}) {
+  const hasAppId = !!cs.app_id_hint
+  const hasToken = !!(cs.has_token && cs.token_valid)
+  const isConnected = channel.status === 'active' && hasToken
+  const hasSynced = !!channel.last_synced
+
+  const steps: GuideStep[] = [
+    {
+      num: 1,
+      title: 'Create an eBay Developer Account',
+      done: hasAppId,
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Go to <a href="https://developer.ebay.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">developer.ebay.com</a> and sign in with your eBay seller account</li>
+          <li>Click <strong>My Account</strong> → <strong>Application Keys</strong></li>
+          <li>Click <strong>Create a keyset</strong> and select <strong>Production</strong></li>
+          <li>Note down your <strong>App ID (Client ID)</strong>, <strong>Cert ID (Client Secret)</strong>, and <strong>Dev ID</strong></li>
+          <li>Under <strong>User Tokens</strong>, select <strong>OAuth User Token</strong></li>
+          <li>Add scopes: <code className="text-xs bg-gray-100 px-1 rounded">sell.fulfillment</code>, <code className="text-xs bg-gray-100 px-1 rounded">sell.inventory</code></li>
+          <li>Configure a <strong>RuName</strong> (any redirect URI name you define — it wraps your actual redirect URL)</li>
+        </ol>
+      ),
+    },
+    {
+      num: 2,
+      title: 'Paste App ID, Cert ID and RuName into ERP',
+      done: hasAppId,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>Credentials tab</strong> on this page</li>
+          <li>Under <em>Step 1 — App Credentials</em>, enter your <strong>App ID</strong>, <strong>Cert ID</strong>, and <strong>RuName</strong></li>
+          <li>Select the correct <strong>Marketplace</strong> (e.g. EBAY_GB for UK)</li>
+          <li>Check <em>Sandbox</em> only if you are using the eBay sandbox environment for testing</li>
+          <li>Click <strong>Save App Credentials</strong></li>
+        </ol>
+      ),
+    },
+    {
+      num: 3,
+      title: 'Generate Auth URL and grant access in your browser',
+      done: hasToken,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the Credentials tab, click <strong>Generate Auth URL</strong></li>
+          <li>Open the generated link in your browser (must be logged in as the eBay seller)</li>
+          <li>Review the permissions and click <strong>Agree</strong></li>
+          <li>eBay redirects to your RuName URL with <code className="text-xs bg-gray-100 px-1 rounded">?code=v^1.1...</code> in the URL</li>
+          <li>Copy the value after <code className="text-xs bg-gray-100 px-1 rounded">code=</code> (it is long — copy the whole thing)</li>
+        </ol>
+      ),
+      warning: 'The authorization code expires in 5 minutes. Complete the next step immediately after copying it.',
+    },
+    {
+      num: 4,
+      title: 'Exchange the authorization code for tokens',
+      done: hasToken,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the Credentials tab, paste the code into the <em>Step 3 — Paste Authorization Code</em> box</li>
+          <li>Click <strong>Exchange Code</strong></li>
+          <li>A success message confirms tokens were saved. The access token is valid for 2 hours; it auto-refreshes using the refresh token (valid ~18 months)</li>
+        </ol>
+      ),
+    },
+    {
+      num: 5,
+      title: 'Test the connection',
+      done: isConnected,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the Credentials tab, click <strong>Test Connection</strong></li>
+          <li>A green message confirms eBay API access is working</li>
+          <li>A red error usually means: wrong App ID / Cert ID, wrong RuName, token expired, or missing scopes</li>
+        </ol>
+      ),
+    },
+    {
+      num: 6,
+      title: 'Import orders safely',
+      done: hasSynced,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Go to the <strong>Overview</strong> tab and click <strong>Import Orders</strong></li>
+          <li>This pulls orders with status <em>NOT_STARTED</em> or <em>IN_PROGRESS</em> (i.e. paid, awaiting fulfilment)</li>
+          <li>Check <strong>Sales → Orders</strong> to see the imported orders</li>
+          <li><strong>No stock is pushed yet</strong> — mappings are created inactive and must be confirmed first</li>
+        </ol>
+      ),
+      warning: 'Import is safe to run multiple times — duplicates are detected and skipped.',
+    },
+    {
+      num: 7,
+      title: 'Review unmatched orders',
+      done: false,
+      tab: 'unmatched',
+      action: 'Unmatched Orders →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>Unmatched Orders</strong> tab</li>
+          <li>Any order with a line item that could not be matched to an ERP product appears here</li>
+          <li>The error column shows why: missing SKU, no match in ERP catalogue, etc.</li>
+          <li>Go to <strong>SKU Mapping</strong> to add the missing mapping, then re-import</li>
+        </ol>
+      ),
+    },
+    {
+      num: 8,
+      title: 'Activate SKU mappings one at a time',
+      done: false,
+      tab: 'skus',
+      action: 'SKU Mapping →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>SKU Mapping</strong> tab</li>
+          <li>Auto-created mappings show as <em>Inactive</em> — stock will not be pushed until you activate them</li>
+          <li>Verify each row: confirm the <strong>ERP Product</strong> column shows the correct product</li>
+          <li>The <strong>Channel SKU</strong> must match the eBay <strong>Inventory API SKU</strong> (not the listing ID) for stock push to work</li>
+          <li>Click <strong>Inactive</strong> to toggle to <strong>Active</strong> for each confirmed mapping</li>
+        </ol>
+      ),
+      warning: 'Only activate mappings you have verified. Activating a wrong mapping will push incorrect stock to eBay.',
+    },
+    {
+      num: 9,
+      title: 'Dry-run stock push (preview — no changes to eBay)',
+      done: false,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the <strong>Overview</strong> tab, click <strong>Dry Run (preview only)</strong></li>
+          <li>This shows every active mapping and the quantity that <em>would</em> be sent to eBay</li>
+          <li>No API calls are made to eBay — it is completely safe</li>
+          <li>Review the preview table before committing to a live push</li>
+        </ol>
+      ),
+      warning: 'The Dry Run does not check whether your eBay listings were created via the Inventory API. Run it first to confirm the quantities, then do a live push on one listing to check for legacy errors.',
+    },
+    {
+      num: 10,
+      title: 'Live stock push on one listing',
+      done: false,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Activate exactly <strong>one</strong> SKU mapping for a known Inventory-API listing</li>
+          <li>Click <strong>Push Stock</strong></li>
+          <li>Check the <strong>Sync Logs</strong> tab — a successful push shows "1 updated"</li>
+          <li>If you see <em>"Not found in eBay Inventory API (legacy listing)"</em>, that listing was created via the old Sell Your Item flow. You'll need to re-list it via the Inventory API or update stock manually on eBay</li>
+          <li>Once confirmed working, activate the remaining mappings and push again</li>
+        </ol>
+      ),
+      warning: (
+        <>
+          <strong>Legacy listings warning:</strong> eBay listings created via the traditional "Sell Your Item" flow
+          (including most bulk-imported listings) are not accessible through the Inventory API.
+          The stock push will log these as "legacy" and skip them — it will NOT break or corrupt anything.
+          To fix this: re-list the item using eBay's Inventory API (via third-party tools or the eBay Seller Hub).
+        </>
+      ),
+    },
+    {
+      num: 11,
+      title: 'Test tracking push on one order',
+      done: false,
+      tab: 'tracking',
+      action: 'Push Tracking →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Dispatch a sales order in ERP with a real tracking number (Sales → Orders → Dispatch)</li>
+          <li>Go to the <strong>Push Tracking</strong> tab</li>
+          <li>Enter the ERP Sales Order ID, Order Number, or eBay Order ID</li>
+          <li>Optionally enter a tracking number and courier override (e.g. "Royal Mail" → mapped to ROYALMAIL)</li>
+          <li>Click <strong>Push Tracking to eBay</strong></li>
+          <li>Check the eBay order in Seller Hub — it should show as <em>Shipped</em> with the tracking number</li>
+          <li>Check <strong>Sync Logs</strong> for the result</li>
+        </ol>
+      ),
+      warning: 'The tracking push marks the eBay order as shipped permanently. Only do this on a real dispatched order with a genuine tracking number.',
+    },
+  ]
+
+  return (
+    <div className="p-5 space-y-3">
+      <div className="flex items-center gap-3">
+        <div>
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-blue-600" /> eBay Live Test Checklist
+          </h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Step-by-step guide to connect, test, and go live with eBay integration. Click any step to expand instructions.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {steps.map(step => (
+          <StepRow key={step.num} step={step} onGotoTab={onGotoTab} />
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function ChannelDetailPage() {
@@ -411,7 +678,24 @@ export default function ChannelDetailPage() {
     onSuccess: () => refetchSkuMappings(),
   })
 
-  const isBusy = syncOrdersMut.isPending || pushStockMut.isPending
+  // eBay dry-run stock push
+  const [dryRunResult, setDryRunResult] = useState<{
+    preview: Array<{ erp_sku: string; ebay_sku: string; qty: number }>
+    message: string
+  } | null>(null)
+
+  const dryRunMut = useMutation({
+    mutationFn: () => channelsApi.pushStockDryRun(channelId).then(r => r.data),
+    onSuccess: (data) => {
+      setDryRunResult({ preview: data.preview || [], message: data.message || '' })
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Dry run failed'
+      setSyncResult({ id: 0, sync_type: 'push_stock', status: 'failed', records_processed: 0, records_created: 0, records_updated: 0, records_failed: 0, message: msg, started_at: new Date().toISOString(), completed_at: null, duration_seconds: null })
+    },
+  })
+
+  const isBusy = syncOrdersMut.isPending || pushStockMut.isPending || dryRunMut.isPending
 
   if (isLoading) {
     return <div className="p-6 text-gray-400">Loading…</div>
@@ -470,6 +754,11 @@ export default function ChannelDetailPage() {
           <button className={tabClass('tracking')} onClick={() => setTab('tracking')}>
             <Truck className="w-3.5 h-3.5" /> Push Tracking
           </button>
+          {isEbay && (
+            <button className={tabClass('guide')} onClick={() => setTab('guide')}>
+              <BookOpen className="w-3.5 h-3.5" /> Live Test Guide
+            </button>
+          )}
         </div>
 
         {/* Placeholder panels for tabs not yet implemented */}
@@ -1126,6 +1415,10 @@ export default function ChannelDetailPage() {
             </button>
           </div>
         )}
+        {/* eBay Live Test Guide */}
+        {tab === 'guide' && isEbay && (
+          <EbayGuideTab cs={cs} channel={channel} onGotoTab={setTab} />
+        )}
       </div>
 
       {/* Overview tab: all existing sections */}
@@ -1255,10 +1548,53 @@ export default function ChannelDetailPage() {
           </button>
         </div>
 
+        {/* eBay dry run */}
+        {isEbay && (
+          <div className="space-y-2">
+            <button
+              onClick={() => { setDryRunResult(null); dryRunMut.mutate() }}
+              disabled={isBusy || !cs.is_configured}
+              className="flex items-center gap-2 px-4 py-2 border border-purple-300 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-50 disabled:opacity-50"
+            >
+              {dryRunMut.isPending
+                ? <><RefreshCw className="w-4 h-4 animate-spin" /> Checking…</>
+                : <><FlaskConical className="w-4 h-4" /> Dry Run (preview only — no changes)</>}
+            </button>
+            {dryRunResult && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-purple-800">
+                  Dry Run: {dryRunResult.preview.length} listing(s) would be updated
+                </p>
+                {dryRunResult.preview.length > 0 && (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-purple-600 uppercase tracking-wide">
+                        <th className="text-left py-1">ERP SKU</th>
+                        <th className="text-left py-1">eBay Inventory SKU</th>
+                        <th className="text-right py-1">Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-purple-100">
+                      {dryRunResult.preview.map((p, i) => (
+                        <tr key={i}>
+                          <td className="py-1 font-mono">{p.erp_sku}</td>
+                          <td className="py-1 font-mono">{p.ebay_sku}</td>
+                          <td className="py-1 text-right font-semibold">{p.qty}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <p className="text-xs text-purple-600 italic">No changes were made to eBay.</p>
+              </div>
+            )}
+          </div>
+        )}
+
         <p className="text-xs text-gray-400">
-          <strong>Import Orders</strong> pulls WooCommerce orders with status processing/on-hold/pending.
-          <strong className="ml-2">Push Stock</strong> updates qty_available for all linked products.
-          SKUs are matched automatically; unmatched items are imported as-is.
+          <strong>Import Orders</strong> pulls {isEbay ? 'eBay' : 'WooCommerce'} orders with status processing/on-hold/pending.
+          <strong className="ml-2">Push Stock</strong> updates qty_available for all <strong>confirmed active</strong> mappings only — inactive mappings are never pushed.
+          {isEbay && <><br /><strong className="text-amber-600">Note:</strong> Only listings managed via the eBay Inventory API can be updated. Traditional "Sell Your Item" listings are skipped and logged.</>}
         </p>
 
         {/* Push tracking */}

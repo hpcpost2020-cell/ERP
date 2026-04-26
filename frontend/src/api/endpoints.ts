@@ -145,6 +145,7 @@ export const channels = {
   sync: (id: number) => api.post(`/channels/${id}/sync/`),
   syncOrders: (id: number) => api.post(`/channels/${id}/sync-orders/`),
   pushStock: (id: number) => api.post(`/channels/${id}/push-stock/`),
+  pushStockDryRun: (id: number) => api.post(`/channels/${id}/push-stock/?dry_run=true`),
   pushTracking: (id: number, data: unknown) => api.post(`/channels/${id}/push-tracking/`, data),
   syncLogs: (id: number) => api.get(`/channels/${id}/sync-logs/`),
   marketplaceOrders: (id: number) => api.get(`/channels/${id}/marketplace-orders/`),

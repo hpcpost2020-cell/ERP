@@ -771,21 +771,25 @@ def import_ebay_orders(channel, user) -> dict:
     return stats
 
 
-def push_stock_to_ebay(channel) -> dict:
+def push_stock_to_ebay(channel, dry_run: bool = False) -> dict:
     """
     Push qty_available to eBay for all CONFIRMED (is_active=True) ChannelListings.
 
     Uses the Inventory API (PUT /inventory_item/{sku}).  The ChannelListing must
-    have external_sku set to the eBay inventory SKU.  Listings with no external_sku
-    are counted as skipped.
+    have external_sku set to the eBay inventory SKU.
 
-    Returns: {success, failed, skipped, not_confirmed}
+    dry_run=True: calculates what would be pushed but makes NO eBay API calls.
+                  Returns preview list in stats['preview'].
+
+    Important: Only listings managed through the eBay Inventory API can be updated
+    this way. Listings created via the traditional "Sell Your Item" flow will return
+    a 404 or 422 from the Inventory API — they are counted in stats['legacy'].
+
+    Returns: {success, failed, skipped, not_confirmed, legacy, dry_run, errors, preview}
     """
     from django.db.models import Sum
     from products.models import ChannelListing, StockLevel
     from .integrations.ebay import EbayError
-
-    client = _get_ebay_client(channel)
 
     confirmed = (
         ChannelListing.objects
@@ -798,10 +802,36 @@ def push_stock_to_ebay(channel) -> dict:
         .filter(channel='ebay', is_active=False)
         .count()
     )
+    id_only_count = ChannelListing.objects.filter(
+        channel='ebay', is_active=True, external_sku=''
+    ).count()
+
     stats = {
-        'success': 0, 'failed': 0, 'skipped': 0,
+        'success': 0, 'failed': 0, 'skipped': id_only_count,
         'not_confirmed': not_confirmed_count,
+        'legacy': 0,
+        'dry_run': dry_run,
+        'errors': [],
+        'preview': [],
     }
+
+    if dry_run:
+        # No API calls — just show what would be pushed
+        for listing in confirmed:
+            agg = StockLevel.objects.filter(product=listing.product).aggregate(
+                on_hand=Sum('qty_on_hand'),
+                reserved=Sum('qty_reserved'),
+            )
+            available = max(0, int(agg['on_hand'] or 0) - int(agg['reserved'] or 0))
+            stats['preview'].append({
+                'erp_sku': listing.product.sku,
+                'ebay_sku': listing.external_sku,
+                'qty': available,
+            })
+            stats['success'] += 1
+        return stats
+
+    client = _get_ebay_client(channel)
 
     for listing in confirmed:
         agg = StockLevel.objects.filter(product=listing.product).aggregate(
@@ -810,23 +840,49 @@ def push_stock_to_ebay(channel) -> dict:
         )
         available = max(0, int(agg['on_hand'] or 0) - int(agg['reserved'] or 0))
         try:
+            # Probe first: if item doesn't exist in Inventory API, count as legacy
+            existing = client.get_inventory_item(listing.external_sku)
+            if existing is None:
+                logger.warning(
+                    'eBay stock: SKU %s (%s) not in Inventory API — legacy listing, skipping.',
+                    listing.external_sku, listing.product.sku,
+                )
+                stats['legacy'] += 1
+                stats['errors'].append({
+                    'erp_sku': listing.product.sku,
+                    'ebay_sku': listing.external_sku,
+                    'error': (
+                        'Not found in eBay Inventory API. This listing was probably created via '
+                        'Sell Your Item (legacy flow) and cannot be updated via the Inventory API. '
+                        'Re-list it using the eBay Inventory API, or update stock manually on eBay.'
+                    ),
+                    'legacy': True,
+                })
+                continue
+
             client.update_inventory_quantity(listing.external_sku, available)
             listing.last_synced = timezone.now()
             listing.save(update_fields=['last_synced'])
             stats['success'] += 1
-            logger.debug(
-                'eBay stock OK: %s → sku=%s qty=%d',
+            logger.info(
+                'eBay stock OK: erp=%s ebay_sku=%s qty=%d',
                 listing.product.sku, listing.external_sku, available,
             )
         except EbayError as exc:
-            logger.error('eBay stock push FAILED: %s: %s', listing.product.sku, exc)
+            errmsg = (
+                f'HTTP {exc.status_code}: {exc}' if exc.status_code else str(exc)
+            )
+            logger.error(
+                'eBay stock push FAILED: erp=%s ebay_sku=%s — %s',
+                listing.product.sku, listing.external_sku, errmsg,
+            )
             stats['failed'] += 1
-
-    # Count listings with no external_sku (item IDs only, can't use Inventory API)
-    id_only = ChannelListing.objects.filter(
-        channel='ebay', is_active=True, external_sku=''
-    ).count()
-    stats['skipped'] += id_only
+            stats['errors'].append({
+                'erp_sku': listing.product.sku,
+                'ebay_sku': listing.external_sku,
+                'error': errmsg,
+                'legacy': False,
+            })
 
     return stats
 
