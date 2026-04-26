@@ -44,6 +44,8 @@ import MobileStockCount from './pages/mobile/wms/MobileStockCount'
 import MobileTransfer from './pages/mobile/wms/MobileTransfer'
 import MobileQC from './pages/mobile/wms/MobileQC'
 import MobileDispatch from './pages/mobile/wms/MobileDispatch'
+import ChannelsPage from './pages/channels/ChannelsPage'
+import ChannelDetailPage from './pages/channels/ChannelDetailPage'
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30000, retry: 1 } } })
 
@@ -95,6 +97,8 @@ function AppRoutes() {
         <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        <Route path="channels" element={<ChannelsPage />} />
+        <Route path="channels/:id" element={<ChannelDetailPage />} />
         <Route path="wms/locations" element={<LocationsPage />} />
         <Route path="wms/stock" element={<StockByLocationPage />} />
         <Route path="wms/transfer" element={<StockTransferPage />} />

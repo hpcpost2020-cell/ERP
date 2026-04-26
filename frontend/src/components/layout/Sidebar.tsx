@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building2,
   BarChart3, FileText, RotateCcw, Ship, Settings, BookOpen, Layers,
   LogOut, CheckSquare, Sliders, Warehouse, MapPin, ArrowLeftRight,
-  PackageCheck, ClipboardList, ScanLine
+  PackageCheck, ClipboardList, ScanLine, Globe
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -29,6 +29,8 @@ const nav = [
   { label: 'Customers', to: '/customers', icon: Users },
   { label: 'Suppliers', to: '/suppliers', icon: Building2 },
   { label: 'Invoices', to: '/invoicing', icon: FileText },
+  { divider: 'Integrations' },
+  { label: 'Sales Channels', to: '/channels', icon: Globe },
   { divider: 'Analytics' },
   { label: 'Reports', to: '/reports', icon: BarChart3 },
   { divider: 'System' },

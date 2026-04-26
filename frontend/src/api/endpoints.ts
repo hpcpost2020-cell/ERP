@@ -136,9 +136,18 @@ export const auditLog = {
 
 export const channels = {
   list: () => api.get('/channels/'),
+  get: (id: number) => api.get(`/channels/${id}/`),
   create: (data: unknown) => api.post('/channels/', data),
   update: (id: number, data: unknown) => api.patch(`/channels/${id}/`, data),
+  delete: (id: number) => api.delete(`/channels/${id}/`),
+  setCredentials: (id: number, data: unknown) => api.post(`/channels/${id}/set-credentials/`, data),
+  testConnection: (id: number) => api.post(`/channels/${id}/test-connection/`),
   sync: (id: number) => api.post(`/channels/${id}/sync/`),
+  syncOrders: (id: number) => api.post(`/channels/${id}/sync-orders/`),
+  pushStock: (id: number) => api.post(`/channels/${id}/push-stock/`),
+  pushTracking: (id: number, orderId: number) => api.post(`/channels/${id}/push-tracking/`, { order_id: orderId }),
+  syncLogs: (id: number) => api.get(`/channels/${id}/sync-logs/`),
+  marketplaceOrders: (id: number) => api.get(`/channels/${id}/marketplace-orders/`),
 }
 
 export const users = {
