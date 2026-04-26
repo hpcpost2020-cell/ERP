@@ -292,7 +292,125 @@ export default function ChannelDetailPage() {
 
         {/* Placeholder panels for tabs not yet implemented */}
         {tab === 'credentials' && (
-          <div className="p-8 text-center text-sm text-gray-400">Credentials tab — coming in Step 2</div>
+          <div className="p-5 space-y-6">
+            {/* How to generate API keys */}
+            {isWC && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
+                <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                  <Tag className="w-4 h-4" /> How to generate WooCommerce API keys
+                </h3>
+                <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                  <li>Log in to your WordPress admin dashboard</li>
+                  <li>Go to <strong>WooCommerce → Settings → Advanced → REST API</strong></li>
+                  <li>Click <strong>Add key</strong></li>
+                  <li>Set Description (e.g. "ERP Integration"), User (admin), Permissions = <strong>Read/Write</strong></li>
+                  <li>Click <strong>Generate API key</strong></li>
+                  <li>Copy the <strong>Consumer key</strong> (starts with <code>ck_</code>) and <strong>Consumer secret</strong> (starts with <code>cs_</code>) — these are shown only once</li>
+                  <li>Paste them into the form below along with your store URL</li>
+                </ol>
+              </div>
+            )}
+
+            {/* Current credential status */}
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+              <h3 className="text-sm font-semibold text-gray-700">Current status</h3>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-gray-400">Store URL</span>
+                  <p className="font-mono text-gray-800 mt-0.5 truncate">{cs.store_url || <span className="text-gray-400 font-sans">Not set</span>}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Consumer Key</span>
+                  <p className="font-mono text-gray-800 mt-0.5">{cs.consumer_key_hint || <span className="text-gray-400 font-sans">Not set</span>}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Consumer Secret</span>
+                  <p className="mt-0.5">
+                    {cs.has_secret
+                      ? <span className="text-green-700 font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Set</span>
+                      : <span className="text-gray-400">Not set</span>}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-gray-400">Configured</span>
+                  <p className="mt-0.5">
+                    {cs.is_configured
+                      ? <span className="text-green-700 font-semibold flex items-center gap-1"><Wifi className="w-3.5 h-3.5" /> Ready</span>
+                      : <span className="text-amber-600 flex items-center gap-1"><WifiOff className="w-3.5 h-3.5" /> Incomplete</span>}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Credentials form */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700">Update credentials</h3>
+              <p className="text-xs text-gray-400">Leave any field blank to keep its existing value. Only non-blank fields will be saved.</p>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Store URL</label>
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={storeUrl}
+                  onChange={e => setStoreUrl(e.target.value)}
+                  placeholder={cs.store_url || 'https://mystore.com'}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Consumer Key</label>
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                  value={consumerKey}
+                  onChange={e => setConsumerKey(e.target.value)}
+                  placeholder={cs.consumer_key_hint ? `Currently: ${cs.consumer_key_hint}… — enter to replace` : 'ck_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Consumer Secret</label>
+                <input
+                  type="password"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                  value={consumerSecret}
+                  onChange={e => setConsumerSecret(e.target.value)}
+                  placeholder={cs.has_secret ? '•••••••• (configured — enter to replace)' : 'cs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+                  autoComplete="new-password"
+                />
+              </div>
+
+              {credError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{credError}</p>}
+              {credSaved && (
+                <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> Credentials saved successfully.
+                </p>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={handleSaveCreds}
+                  disabled={credMut.isPending}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {credMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  {credMut.isPending ? 'Saving…' : 'Save Credentials'}
+                </button>
+                <button
+                  onClick={() => testMut.mutate()}
+                  disabled={testMut.isPending || !cs.is_configured}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {testMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                  {testMut.isPending ? 'Testing…' : 'Test Connection'}
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`flex items-start gap-2 text-sm rounded-lg px-4 py-3 ${testResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+                  {testResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
         )}
         {tab === 'skus' && (
           <div className="p-8 text-center text-sm text-gray-400">SKU Mapping tab — coming in Step 3</div>
