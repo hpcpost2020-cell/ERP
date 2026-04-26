@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom'
 import { useOfflineQueue } from '../../../hooks/useOfflineQueue'
-import { Wifi, WifiOff, Clock, Package, Warehouse, ClipboardList, ArrowLeftRight, BarChart2, CheckCircle2, RefreshCw } from 'lucide-react'
+import { Wifi, WifiOff, Clock, Package, Warehouse, ClipboardList, ArrowLeftRight, BarChart2, CheckCircle2, RefreshCw, Truck } from 'lucide-react'
 
 const workflows = [
   { label: 'Put-Away', icon: Warehouse, to: '/mobile/wms/putaway', color: 'bg-blue-600', desc: 'Receive → Bin' },
   { label: 'Pick List', icon: ClipboardList, to: '/mobile/wms/picking', color: 'bg-green-600', desc: 'Pick orders' },
+  { label: 'Dispatch', icon: Truck, to: '/mobile/wms/dispatch', color: 'bg-blue-800', desc: 'Pack & dispatch' },
   { label: 'Stock Transfer', icon: ArrowLeftRight, to: '/mobile/wms/transfer', color: 'bg-purple-600', desc: 'Move between bins' },
   { label: 'Stock Count', icon: BarChart2, to: '/mobile/wms/count', color: 'bg-orange-500', desc: 'Count & adjust' },
   { label: 'QC / Damaged', icon: CheckCircle2, to: '/mobile/wms/qc', color: 'bg-red-600', desc: 'Pass / fail items' },

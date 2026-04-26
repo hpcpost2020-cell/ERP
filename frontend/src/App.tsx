@@ -43,6 +43,7 @@ import MobilePicking from './pages/mobile/wms/MobilePicking'
 import MobileStockCount from './pages/mobile/wms/MobileStockCount'
 import MobileTransfer from './pages/mobile/wms/MobileTransfer'
 import MobileQC from './pages/mobile/wms/MobileQC'
+import MobileDispatch from './pages/mobile/wms/MobileDispatch'
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30000, retry: 1 } } })
 
@@ -68,6 +69,7 @@ function AppRoutes() {
         <Route path="wms/count" element={<MobileStockCount />} />
         <Route path="wms/transfer" element={<MobileTransfer />} />
         <Route path="wms/qc" element={<MobileQC />} />
+        <Route path="wms/dispatch" element={<MobileDispatch />} />
       </Route>
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />

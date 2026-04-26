@@ -105,6 +105,40 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         log_action(request, 'update', 'SalesOrder', str(order.pk), str(order), {'status': 'dispatched', 'tracking': tracking})
         return Response({'detail': 'Order dispatched.', 'tracking_number': tracking})
 
+    @action(detail=True, methods=['post'], url_path='mark-processing')
+    def mark_processing(self, request, pk=None):
+        order = self.get_object()
+        if order.status == SalesOrder.STATUS_PROCESSING:
+            return Response({'detail': 'Already in processing.'})
+        if order.status != SalesOrder.STATUS_CONFIRMED:
+            return Response({'detail': 'Only confirmed orders can be marked as processing.'}, status=400)
+        order.status = SalesOrder.STATUS_PROCESSING
+        order.save(update_fields=['status'])
+        OrderNote.objects.create(
+            order=order, note_type=OrderNote.TYPE_SYSTEM,
+            content=f"Picking started by {request.user.get_full_name() or request.user.username}",
+            created_by=request.user,
+        )
+        return Response({'detail': 'Order marked as processing.'})
+
+    @action(detail=True, methods=['post'], url_path='mark-ready')
+    def mark_ready_to_dispatch(self, request, pk=None):
+        order = self.get_object()
+        if order.status == SalesOrder.STATUS_AWAITING_DISPATCH:
+            return Response({'detail': 'Already awaiting dispatch.'})
+        if order.status not in [SalesOrder.STATUS_CONFIRMED, SalesOrder.STATUS_PROCESSING]:
+            return Response({'detail': 'Order cannot be marked ready in current status.'}, status=400)
+        order.status = SalesOrder.STATUS_AWAITING_DISPATCH
+        order.save(update_fields=['status'])
+        OrderNote.objects.create(
+            order=order, note_type=OrderNote.TYPE_SYSTEM,
+            content=f"Picking complete — ready to dispatch. Confirmed by {request.user.get_full_name() or request.user.username}",
+            created_by=request.user,
+        )
+        from audit.utils import log_action
+        log_action(request, 'update', 'SalesOrder', str(order.pk), str(order), {'status': 'awaiting_dispatch'})
+        return Response({'detail': 'Order marked as ready to dispatch.'})
+
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel_order(self, request, pk=None):
         order = self.get_object()

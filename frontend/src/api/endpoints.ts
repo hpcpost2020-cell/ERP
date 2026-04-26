@@ -86,6 +86,8 @@ export const sales = {
   updatePayment: (id: number, data: unknown) => api.post(`/sales/${id}/update-payment/`, data),
   addNote: (id: number, data: unknown) => api.post(`/sales/${id}/add-note/`, data),
   stockStatus: (params?: Record<string, unknown>) => api.get('/sales/stock-status/', { params }),
+  markProcessing: (id: number) => api.post(`/sales/${id}/mark-processing/`),
+  markReady: (id: number) => api.post(`/sales/${id}/mark-ready/`),
 }
 
 export const shipping = {
