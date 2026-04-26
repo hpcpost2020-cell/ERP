@@ -5,8 +5,10 @@ import { channels as channelsApi } from '../../api/endpoints'
 import {
   ArrowLeft, RefreshCw, CheckCircle2, AlertTriangle, Wifi, WifiOff,
   Save, ExternalLink, Package, ChevronRight, Clock, Download, Upload,
-  Truck
+  Truck, Link2, Tag
 } from 'lucide-react'
+
+type Tab = 'overview' | 'credentials' | 'skus' | 'unmatched' | 'logs' | 'tracking'
 
 interface CredentialsSummary {
   store_url?: string
@@ -109,6 +111,8 @@ export default function ChannelDetailPage() {
   const nav = useNavigate()
   const qc = useQueryClient()
   const channelId = Number(id)
+
+  const [tab, setTab] = useState<Tab>('overview')
 
   // Credentials form state
   const [storeUrl, setStoreUrl] = useState('')
@@ -214,7 +218,7 @@ export default function ChannelDetailPage() {
 
   // Push tracking
   const pushTrackingMut = useMutation({
-    mutationFn: (orderId: number) => channelsApi.pushTracking(channelId, orderId).then(r => r.data),
+    mutationFn: (orderId: number) => channelsApi.pushTracking(channelId, { order_id: orderId }).then(r => r.data),
     onSuccess: (data) => {
       setTrackingResult({ ok: true, message: data.message })
       setTrackingOrderId('')
@@ -238,6 +242,13 @@ export default function ChannelDetailPage() {
   const cs = channel.credentials_summary || {}
   const isWC = channel.channel_type === 'woocommerce'
 
+  const tabClass = (t: Tab) =>
+    `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+      tab === t
+        ? 'border-blue-600 text-blue-700'
+        : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
+    }`
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       {/* Header */}
@@ -255,6 +266,50 @@ export default function ChannelDetailPage() {
           </span>
         </div>
       </div>
+
+      {/* Tab bar */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="flex overflow-x-auto border-b border-gray-200 px-2">
+          <button className={tabClass('overview')} onClick={() => setTab('overview')}>
+            <Wifi className="w-3.5 h-3.5" /> Overview
+          </button>
+          <button className={tabClass('credentials')} onClick={() => setTab('credentials')}>
+            <Tag className="w-3.5 h-3.5" /> Credentials
+          </button>
+          <button className={tabClass('skus')} onClick={() => setTab('skus')}>
+            <Link2 className="w-3.5 h-3.5" /> SKU Mapping
+          </button>
+          <button className={tabClass('unmatched')} onClick={() => setTab('unmatched')}>
+            <AlertTriangle className="w-3.5 h-3.5" /> Unmatched Orders
+          </button>
+          <button className={tabClass('logs')} onClick={() => setTab('logs')}>
+            <Clock className="w-3.5 h-3.5" /> Sync Logs
+          </button>
+          <button className={tabClass('tracking')} onClick={() => setTab('tracking')}>
+            <Truck className="w-3.5 h-3.5" /> Push Tracking
+          </button>
+        </div>
+
+        {/* Placeholder panels for tabs not yet implemented */}
+        {tab === 'credentials' && (
+          <div className="p-8 text-center text-sm text-gray-400">Credentials tab — coming in Step 2</div>
+        )}
+        {tab === 'skus' && (
+          <div className="p-8 text-center text-sm text-gray-400">SKU Mapping tab — coming in Step 3</div>
+        )}
+        {tab === 'unmatched' && (
+          <div className="p-8 text-center text-sm text-gray-400">Unmatched Orders tab — coming in Step 4</div>
+        )}
+        {tab === 'logs' && (
+          <div className="p-8 text-center text-sm text-gray-400">Sync Logs tab — coming in Step 5</div>
+        )}
+        {tab === 'tracking' && (
+          <div className="p-8 text-center text-sm text-gray-400">Push Tracking tab — coming in Step 5</div>
+        )}
+      </div>
+
+      {/* Overview tab: all existing sections */}
+      {tab === 'overview' && (<>
 
       {/* ── Section 1: Credentials ─────────────────────────────────────────── */}
       {isWC && (
@@ -546,6 +601,9 @@ export default function ChannelDetailPage() {
           </>
         )}
       </div>
+
+      </>)}
+
     </div>
   )
 }
