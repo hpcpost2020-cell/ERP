@@ -21,6 +21,7 @@ const nav = [
   { label: 'Stock Transfer', to: '/wms/transfer', icon: ArrowLeftRight },
   { label: 'Stock by Location', to: '/wms/stock', icon: ScanLine },
   { label: 'Locations', to: '/wms/locations', icon: MapPin },
+  { label: 'Mobile Scanner', to: '/mobile/wms', icon: ScanLine, highlight: true },
   { divider: 'Catalogue' },
   { label: 'Products', to: '/products', icon: Package },
   { label: 'Inventory', to: '/inventory', icon: Layers },
@@ -66,7 +67,11 @@ export default function Sidebar() {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
-              className={({ isActive }) => isActive ? 'sidebar-link-active' : 'sidebar-link-inactive'}
+              className={({ isActive }) =>
+                isActive ? 'sidebar-link-active' :
+                ('highlight' in item && item.highlight) ? 'sidebar-link-inactive font-semibold text-brand-600' :
+                'sidebar-link-inactive'
+              }
             >
               <Icon className="w-4 h-4 shrink-0" />
               <span>{item.label}</span>

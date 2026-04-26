@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './components/ui/Toast'
@@ -36,6 +36,13 @@ import QcItemPage from './pages/wms/QcItemPage'
 import PutAwayPage from './pages/wms/PutAwayPage'
 import PickingPage from './pages/wms/PickingPage'
 import Loading from './components/ui/Loading'
+import MobileHome from './pages/mobile/wms/MobileHome'
+import MobileScanProduct from './pages/mobile/wms/MobileScanProduct'
+import MobilePutAway from './pages/mobile/wms/MobilePutAway'
+import MobilePicking from './pages/mobile/wms/MobilePicking'
+import MobileStockCount from './pages/mobile/wms/MobileStockCount'
+import MobileTransfer from './pages/mobile/wms/MobileTransfer'
+import MobileQC from './pages/mobile/wms/MobileQC'
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30000, retry: 1 } } })
 
@@ -52,6 +59,16 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" /> : <LoginPage />} />
+      {/* Mobile scanner routes — no sidebar layout */}
+      <Route path="/mobile" element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
+        <Route path="wms" element={<MobileHome />} />
+        <Route path="wms/scan" element={<MobileScanProduct />} />
+        <Route path="wms/putaway" element={<MobilePutAway />} />
+        <Route path="wms/picking" element={<MobilePicking />} />
+        <Route path="wms/count" element={<MobileStockCount />} />
+        <Route path="wms/transfer" element={<MobileTransfer />} />
+        <Route path="wms/qc" element={<MobileQC />} />
+      </Route>
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
         <Route path="products" element={<ProductsPage />} />
