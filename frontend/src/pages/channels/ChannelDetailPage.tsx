@@ -43,6 +43,30 @@ interface MpOrder {
   imported_at: string | null
 }
 
+interface SkuMapping {
+  id: number
+  product: number
+  product_sku: string
+  product_title: string
+  channel: string
+  external_id: string
+  parent_id: string
+  external_sku: string
+  channel_price: string | null
+  is_active: boolean
+  last_synced: string | null
+  is_variation: boolean
+}
+
+interface UnmatchedOrder {
+  id: number
+  external_order_id: string
+  external_order_number: string
+  status: string
+  error_message: string
+  fetched_at: string
+}
+
 interface Channel {
   id: number
   name: string
@@ -125,6 +149,14 @@ export default function ChannelDetailPage() {
   const [trackingOrderId, setTrackingOrderId] = useState('')
   const [trackingResult, setTrackingResult] = useState<{ ok: boolean; message: string } | null>(null)
 
+  // SKU Mapping form
+  const [newExtSku, setNewExtSku] = useState('')
+  const [newExtId, setNewExtId] = useState('')
+  const [newParentId, setNewParentId] = useState('')
+  const [newErpSku, setNewErpSku] = useState('')
+  const [skuFormError, setSkuFormError] = useState('')
+  const [skuFormOk, setSkuFormOk] = useState('')
+
   // Inline action results
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [syncResult, setSyncResult] = useState<SyncLog | null>(null)
@@ -147,6 +179,19 @@ export default function ChannelDetailPage() {
     enabled: !!channel,
   })
   const mpOrders: MpOrder[] = Array.isArray(mpOrdersData) ? mpOrdersData : []
+
+  const { data: skuMappingsData, refetch: refetchSkuMappings } = useQuery({
+    queryKey: ['channel-sku-mappings', channelId],
+    queryFn: () => channelsApi.skuMappings(channelId).then(r => r.data as SkuMapping[]),
+    enabled: !!channel,
+  })
+  const skuMappings: SkuMapping[] = Array.isArray(skuMappingsData) ? skuMappingsData : []
+
+  const { data: _unmatchedData } = useQuery({
+    queryKey: ['channel-unmatched-orders', channelId],
+    queryFn: () => channelsApi.unmatchedOrders(channelId).then(r => r.data as UnmatchedOrder[]),
+    enabled: !!channel,
+  })
 
   // Credentials save
   const credMut = useMutation({
@@ -228,6 +273,37 @@ export default function ChannelDetailPage() {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Push failed'
       setTrackingResult({ ok: false, message: msg })
     },
+  })
+
+  // Create SKU mapping
+  const createSkuMut = useMutation({
+    mutationFn: (data: Record<string, string>) => channelsApi.createSkuMapping(channelId, data).then(r => r.data),
+    onSuccess: () => {
+      setSkuFormOk('Mapping created.')
+      setSkuFormError('')
+      setNewExtSku(''); setNewExtId(''); setNewParentId(''); setNewErpSku('')
+      refetchSkuMappings()
+      setTimeout(() => setSkuFormOk(''), 3000)
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string; detail?: string } } })?.response?.data?.error
+        || (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || 'Failed to create mapping'
+      setSkuFormError(msg)
+    },
+  })
+
+  // Toggle SKU mapping active
+  const toggleSkuMut = useMutation({
+    mutationFn: ({ listingId, isActive }: { listingId: number; isActive: boolean }) =>
+      channelsApi.updateSkuMapping(channelId, { listing_id: listingId, is_active: isActive }).then(r => r.data),
+    onSuccess: () => refetchSkuMappings(),
+  })
+
+  // Delete SKU mapping
+  const deleteSkuMut = useMutation({
+    mutationFn: (listingId: number) => channelsApi.deleteSkuMapping(channelId, listingId).then(r => r.data),
+    onSuccess: () => refetchSkuMappings(),
   })
 
   const isBusy = syncOrdersMut.isPending || pushStockMut.isPending
@@ -413,7 +489,133 @@ export default function ChannelDetailPage() {
           </div>
         )}
         {tab === 'skus' && (
-          <div className="p-8 text-center text-sm text-gray-400">SKU Mapping tab — coming in Step 3</div>
+          <div className="divide-y divide-gray-100">
+            {/* Explanation */}
+            <div className="p-4 bg-amber-50 text-amber-800 text-sm flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Stock push safety:</strong> Only mappings marked <strong>Active</strong> will push stock to WooCommerce.
+                Auto-created mappings start as inactive. Review and activate each one after confirming the product match is correct.
+              </span>
+            </div>
+
+            {/* Mapping table */}
+            {skuMappings.length === 0 ? (
+              <div className="p-8 text-center text-sm text-gray-400">
+                No SKU mappings yet. Import orders to auto-create mappings, or add one manually below.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+                      <th className="px-4 py-2.5 text-left font-medium">WC SKU</th>
+                      <th className="px-4 py-2.5 text-left font-medium">WC ID</th>
+                      <th className="px-4 py-2.5 text-left font-medium">ERP Product</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Active</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Last Synced</th>
+                      <th className="px-4 py-2.5 text-left font-medium"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {skuMappings.map(m => (
+                      <tr key={m.id} className={`hover:bg-gray-50 ${!m.is_active ? 'opacity-60' : ''}`}>
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-700">{m.external_sku || m.external_id}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
+                          {m.parent_id ? `${m.parent_id} / ${m.external_id}` : m.external_id}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <p className="font-mono text-xs text-gray-800">{m.product_sku}</p>
+                          <p className="text-xs text-gray-400 truncate max-w-[160px]">{m.product_title}</p>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${m.is_variation ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {m.is_variation ? 'Variation' : 'Simple'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            onClick={() => toggleSkuMut.mutate({ listingId: m.id, isActive: !m.is_active })}
+                            disabled={toggleSkuMut.isPending}
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full cursor-pointer border ${m.is_active ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200' : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'}`}
+                          >
+                            {m.is_active ? 'Active' : 'Inactive'}
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-gray-400">{timeAgo(m.last_synced)}</td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            onClick={() => { if (confirm('Delete this mapping?')) deleteSkuMut.mutate(m.id) }}
+                            disabled={deleteSkuMut.isPending}
+                            className="text-xs text-red-500 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Add manual mapping */}
+            <div className="p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Link2 className="w-4 h-4" /> Add Manual Mapping</h3>
+              <p className="text-xs text-gray-400">
+                Enter the WooCommerce product details and the ERP product SKU. For variable products, enter the variation ID in "WC ID" and the parent product ID in "Parent ID".
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">WC SKU (external_sku)</label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    value={newExtSku} onChange={e => setNewExtSku(e.target.value)}
+                    placeholder="e.g. WC-SHIRT-RED-M"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">WC Product/Variation ID</label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    value={newExtId} onChange={e => setNewExtId(e.target.value)}
+                    placeholder="e.g. 123 (or variation ID)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Parent Product ID (variations only)</label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    value={newParentId} onChange={e => setNewParentId(e.target.value)}
+                    placeholder="Leave blank for simple products"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">ERP Product SKU</label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    value={newErpSku} onChange={e => setNewErpSku(e.target.value)}
+                    placeholder="e.g. SHIRT-RED-M"
+                  />
+                </div>
+              </div>
+              {skuFormError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{skuFormError}</p>}
+              {skuFormOk && <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />{skuFormOk}</p>}
+              <button
+                onClick={() => {
+                  setSkuFormError('')
+                  if (!newExtId || !newErpSku) { setSkuFormError('WC ID and ERP SKU are required'); return }
+                  createSkuMut.mutate({ external_id: newExtId, external_sku: newExtSku, parent_id: newParentId, sku: newErpSku })
+                }}
+                disabled={createSkuMut.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+              >
+                {createSkuMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                {createSkuMut.isPending ? 'Creating…' : 'Create Mapping'}
+              </button>
+            </div>
+          </div>
         )}
         {tab === 'unmatched' && (
           <div className="p-8 text-center text-sm text-gray-400">Unmatched Orders tab — coming in Step 4</div>
