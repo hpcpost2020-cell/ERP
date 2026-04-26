@@ -22,9 +22,13 @@ export const products = {
   movements: (id: number) => api.get(`/products/${id}/movements/`),
   lowStock: () => api.get('/products/low-stock/'),
   categories: () => api.get('/products/categories/'),
-  locations: () => api.get('/products/locations/'),
+  locations: (params?: Record<string, unknown>) => api.get('/products/locations/', { params }),
+  createLocation: (data: unknown) => api.post('/products/locations/', data),
+  updateLocation: (id: number, data: unknown) => api.patch(`/products/locations/${id}/`, data),
+  stockLevels: (params?: Record<string, unknown>) => api.get('/products/stock-levels/', { params }),
   stockMovements: (params?: Record<string, unknown>) => api.get('/products/stock-movements/', { params }),
   adjust: (data: unknown) => api.post('/products/stock-movements/adjust/', data),
+  searchByBarcode: (barcode: string) => api.get('/products/search-by-barcode/', { params: { barcode } }),
 }
 
 export const suppliers = {
@@ -45,6 +49,15 @@ export const purchasing = {
   receive: (id: number, data: unknown) => api.post(`/purchasing/${id}/receive/`, data),
   cancel: (id: number) => api.post(`/purchasing/${id}/cancel/`),
   creditNotes: (params?: Record<string, unknown>) => api.get('/purchasing/credit-notes/', { params }),
+  receipts: (params?: Record<string, unknown>) => api.get('/purchasing/receipts/', { params }),
+  receipt: (id: number) => api.get(`/purchasing/receipts/${id}/`),
+  receiptQcPending: (id: number) => api.get(`/purchasing/receipts/${id}/qc-pending/`),
+  qcItems: (params?: Record<string, unknown>) => api.get('/purchasing/qc-items/', { params }),
+  qcPending: () => api.get('/purchasing/qc-items/pending/'),
+  qcItem: (id: number) => api.get(`/purchasing/qc-items/${id}/`),
+  qcPass: (id: number, data?: unknown) => api.post(`/purchasing/qc-items/${id}/qc-pass/`, data || {}),
+  qcFail: (id: number, data: unknown) => api.post(`/purchasing/qc-items/${id}/qc-fail/`, data),
+  qcQuarantine: (id: number, data?: unknown) => api.post(`/purchasing/qc-items/${id}/qc-quarantine/`, data || {}),
 }
 
 export const customers = {

@@ -2,7 +2,8 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Package, ShoppingCart, Truck, Users, Building2,
   BarChart3, FileText, RotateCcw, Ship, Settings, BookOpen, Layers,
-  LogOut, CheckSquare, Sliders
+  LogOut, CheckSquare, Sliders, Warehouse, MapPin, ArrowLeftRight,
+  PackageCheck, ClipboardList, ScanLine
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -13,6 +14,13 @@ const nav = [
   { label: 'Purchase Orders', to: '/purchasing', icon: Truck },
   { label: 'Shipping', to: '/shipping', icon: Ship },
   { label: 'Returns', to: '/returns', icon: RotateCcw },
+  { divider: 'Warehouse' },
+  { label: 'Goods In / QC', to: '/wms/goods-in', icon: PackageCheck },
+  { label: 'Put-Away', to: '/wms/putaway', icon: Warehouse },
+  { label: 'Pick List', to: '/wms/picking', icon: ClipboardList },
+  { label: 'Stock Transfer', to: '/wms/transfer', icon: ArrowLeftRight },
+  { label: 'Stock by Location', to: '/wms/stock', icon: ScanLine },
+  { label: 'Locations', to: '/wms/locations', icon: MapPin },
   { divider: 'Catalogue' },
   { label: 'Products', to: '/products', icon: Package },
   { label: 'Inventory', to: '/inventory', icon: Layers },

@@ -27,6 +27,14 @@ import UsersPage from './pages/users/UsersPage'
 import AuditPage from './pages/audit/AuditPage'
 import SettingsPage from './pages/settings/SettingsPage'
 import TasksPage from './pages/tasks/TasksPage'
+import LocationsPage from './pages/wms/LocationsPage'
+import StockByLocationPage from './pages/wms/StockByLocationPage'
+import StockTransferPage from './pages/wms/StockTransferPage'
+import GoodsInPage from './pages/wms/GoodsInPage'
+import GoodsReceiptDetailPage from './pages/wms/GoodsReceiptDetailPage'
+import QcItemPage from './pages/wms/QcItemPage'
+import PutAwayPage from './pages/wms/PutAwayPage'
+import PickingPage from './pages/wms/PickingPage'
 import Loading from './components/ui/Loading'
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30000, retry: 1 } } })
@@ -68,6 +76,14 @@ function AppRoutes() {
         <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="tasks" element={<TasksPage />} />
+        <Route path="wms/locations" element={<LocationsPage />} />
+        <Route path="wms/stock" element={<StockByLocationPage />} />
+        <Route path="wms/transfer" element={<StockTransferPage />} />
+        <Route path="wms/goods-in" element={<GoodsInPage />} />
+        <Route path="wms/goods-in/:id" element={<QcItemPage />} />
+        <Route path="wms/receipts/:id" element={<GoodsReceiptDetailPage />} />
+        <Route path="wms/putaway" element={<PutAwayPage />} />
+        <Route path="wms/picking" element={<PickingPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Route>
     </Routes>
