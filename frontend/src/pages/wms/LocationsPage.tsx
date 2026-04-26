@@ -4,16 +4,25 @@ import { products as productApi } from '../../api/endpoints'
 import { useToast } from '../../components/ui/Toast'
 import Loading from '../../components/ui/Loading'
 import SearchBar from '../../components/ui/SearchBar'
-import { Plus, Edit2, ToggleLeft, ToggleRight, X, MapPin } from 'lucide-react'
+import { Plus, Edit2, ToggleLeft, ToggleRight, X, MapPin, Inbox } from 'lucide-react'
 
-interface Location { id: number; code: string; name: string; description: string; is_active: boolean }
+interface Location {
+  id: number
+  code: string
+  name: string
+  description: string
+  is_active: boolean
+  is_receiving_bay: boolean
+}
 
-const emptyLoc = { code: '', name: '', description: '', is_active: true }
+const emptyLoc = { code: '', name: '', description: '', is_active: true, is_receiving_bay: false }
 
 function LocationModal({ loc, onClose }: { loc?: Location; onClose: () => void }) {
   const qc = useQueryClient()
   const toast = useToast()
-  const [form, setForm] = useState(loc ? { code: loc.code, name: loc.name, description: loc.description, is_active: loc.is_active } : { ...emptyLoc })
+  const [form, setForm] = useState(loc
+    ? { code: loc.code, name: loc.name, description: loc.description, is_active: loc.is_active, is_receiving_bay: loc.is_receiving_bay }
+    : { ...emptyLoc })
   const [error, setError] = useState('')
 
   const save = useMutation({
@@ -59,6 +68,13 @@ function LocationModal({ loc, onClose }: { loc?: Location; onClose: () => void }
               <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} className="rounded" />
               <span className="text-sm font-medium text-gray-700">Active (available for stock)</span>
             </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={form.is_receiving_bay} onChange={e => setForm(p => ({ ...p, is_receiving_bay: e.target.checked }))} className="rounded" />
+              <div>
+                <span className="text-sm font-medium text-gray-700">Receiving Bay</span>
+                <p className="text-xs text-gray-400">Incoming goods land here; put-away transfers stock from this location to bins</p>
+              </div>
+            </label>
           </div>
           <div className="modal-footer">
             <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
@@ -86,6 +102,12 @@ export default function LocationsPage() {
   const toggle = useMutation({
     mutationFn: (loc: Location) => productApi.updateLocation(loc.id, { is_active: !loc.is_active }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['locations'] }); toast('Location updated', 'success') },
+    onError: () => toast('Failed to update', 'error'),
+  })
+
+  const toggleBay = useMutation({
+    mutationFn: (loc: Location) => productApi.updateLocation(loc.id, { is_receiving_bay: !loc.is_receiving_bay }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['locations'] }); toast('Receiving bay updated', 'success') },
     onError: () => toast('Failed to update', 'error'),
   })
 
@@ -130,8 +152,13 @@ export default function LocationsPage() {
                 <tr key={loc.id}>
                   <td>
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
+                      {loc.is_receiving_bay
+                        ? <Inbox className="w-4 h-4 text-blue-500 shrink-0" />
+                        : <MapPin className="w-4 h-4 text-gray-400 shrink-0" />}
                       <span className="font-mono font-semibold text-sm">{loc.code}</span>
+                      {loc.is_receiving_bay && (
+                        <span className="badge badge-blue text-xs">Receiving Bay</span>
+                      )}
                     </div>
                   </td>
                   <td className="font-medium">{loc.name}</td>
@@ -146,8 +173,19 @@ export default function LocationsPage() {
                       <button className="btn btn-secondary btn-sm" onClick={() => setEditLoc(loc)}>
                         <Edit2 className="w-3 h-3" /> Edit
                       </button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => toggle.mutate(loc)} title={loc.is_active ? 'Deactivate' : 'Activate'}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => toggle.mutate(loc)}
+                        title={loc.is_active ? 'Deactivate' : 'Activate'}
+                      >
                         {loc.is_active ? <ToggleRight className="w-4 h-4 text-green-600" /> : <ToggleLeft className="w-4 h-4 text-gray-400" />}
+                      </button>
+                      <button
+                        className={`btn btn-sm ${loc.is_receiving_bay ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => toggleBay.mutate(loc)}
+                        title={loc.is_receiving_bay ? 'Remove receiving bay flag' : 'Mark as receiving bay'}
+                      >
+                        <Inbox className="w-3 h-3" />
                       </button>
                     </div>
                   </td>

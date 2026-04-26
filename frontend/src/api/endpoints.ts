@@ -28,6 +28,7 @@ export const products = {
   stockLevels: (params?: Record<string, unknown>) => api.get('/products/stock-levels/', { params }),
   stockMovements: (params?: Record<string, unknown>) => api.get('/products/stock-movements/', { params }),
   adjust: (data: unknown) => api.post('/products/stock-movements/adjust/', data),
+  transfer: (data: unknown) => api.post('/products/stock-movements/transfer/', data),
   searchByBarcode: (barcode: string) => api.get('/products/search-by-barcode/', { params: { barcode } }),
 }
 
@@ -84,6 +85,7 @@ export const sales = {
   cancel: (id: number) => api.post(`/sales/${id}/cancel/`),
   updatePayment: (id: number, data: unknown) => api.post(`/sales/${id}/update-payment/`, data),
   addNote: (id: number, data: unknown) => api.post(`/sales/${id}/add-note/`, data),
+  stockStatus: (params?: Record<string, unknown>) => api.get('/sales/stock-status/', { params }),
 }
 
 export const shipping = {

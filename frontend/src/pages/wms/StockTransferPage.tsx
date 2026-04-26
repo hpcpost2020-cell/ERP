@@ -51,10 +51,13 @@ export default function StockTransferPage() {
 
   const transfer = useMutation({
     mutationFn: async () => {
-      const transferNote = `Transfer from ${locs.find(l => String(l.id) === fromLoc)?.code} to ${locs.find(l => String(l.id) === toLoc)?.code}${notes ? ` — ${notes}` : ''}`
-      const qty_n = Number(qty)
-      await productApi.adjust({ product: selectedProduct!.id, location: Number(fromLoc), quantity: -qty_n, notes: transferNote })
-      await productApi.adjust({ product: selectedProduct!.id, location: Number(toLoc), quantity: qty_n, notes: transferNote })
+      await productApi.transfer({
+        product: selectedProduct!.id,
+        from_location: Number(fromLoc),
+        to_location: Number(toLoc),
+        quantity: Number(qty),
+        notes: notes || undefined,
+      })
     },
     onSuccess: () => {
       const fromCode = locs.find(l => String(l.id) === fromLoc)?.code || ''
@@ -264,7 +267,7 @@ export default function StockTransferPage() {
 function RecentTransfers() {
   const { data } = useQuery({
     queryKey: ['recent-transfers'],
-    queryFn: () => productApi.stockMovements({ movement_type: 'adjustment', page_size: 10, ordering: '-created_at' }).then(r => r.data),
+    queryFn: () => productApi.stockMovements({ movement_type: 'transfer', page_size: 20, ordering: '-created_at' }).then(r => r.data),
     refetchInterval: 10000,
   })
 
@@ -274,7 +277,7 @@ function RecentTransfers() {
 
   return (
     <div className="card">
-      <div className="card-header"><span className="font-semibold text-sm">Recent Adjustments</span></div>
+      <div className="card-header"><span className="font-semibold text-sm">Recent Transfers</span></div>
       <div className="table-container">
         <table>
           <thead><tr><th>Time</th><th>SKU</th><th>Location</th><th>Qty</th><th>Notes</th><th>By</th></tr></thead>

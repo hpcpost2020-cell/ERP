@@ -3,11 +3,25 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import rest_framework as df_filters
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from .models import SalesOrder, SalesOrderItem, OrderNote
 from .serializers import SalesOrderSerializer, SalesOrderListSerializer, OrderNoteSerializer
+
+
+class SalesOrderFilter(df_filters.FilterSet):
+    """Allow comma-separated values for status and payment_status filters.
+    e.g. ?status=confirmed,processing,awaiting_dispatch"""
+    status = df_filters.BaseInFilter(field_name='status', lookup_expr='in')
+    payment_status = df_filters.BaseInFilter(field_name='payment_status', lookup_expr='in')
+    channel = df_filters.CharFilter(field_name='channel', lookup_expr='exact')
+
+    class Meta:
+        model = SalesOrder
+        fields = ['status', 'channel', 'payment_status']
 
 
 class SalesOrderViewSet(viewsets.ModelViewSet):
@@ -16,7 +30,7 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
     ).all()
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'channel', 'payment_status']
+    filterset_class = SalesOrderFilter
     search_fields = ['order_number', 'external_order_id', 'ship_to_name', 'ship_to_email',
                      'ship_to_postcode', 'customer__company_name', 'customer__email',
                      'marketplace_order_id']
@@ -112,6 +126,41 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(created_by=request.user, order=order)
         return Response(serializer.data, status=201)
+
+    @action(detail=False, methods=['get'], url_path='stock-status')
+    def stock_status(self, request):
+        """Return {order_id: has_issue} for all orders matching the given comma-separated statuses."""
+        status_param = request.query_params.get('status', '')
+        statuses = [s.strip() for s in status_param.split(',') if s.strip()]
+        if not statuses:
+            return Response({})
+
+        from products.models import StockLevel
+
+        orders = list(SalesOrder.objects.filter(status__in=statuses).prefetch_related('items__product'))
+
+        product_ids = set()
+        for order in orders:
+            for item in order.items.all():
+                if item.product_id:
+                    product_ids.add(item.product_id)
+
+        stock_by_product = {}
+        if product_ids:
+            for sl in StockLevel.objects.filter(product_id__in=product_ids).values('product_id', 'qty_on_hand', 'qty_reserved'):
+                avail = (sl['qty_on_hand'] or 0) - (sl['qty_reserved'] or 0)
+                stock_by_product[sl['product_id']] = stock_by_product.get(sl['product_id'], 0) + avail
+
+        result = {}
+        for order in orders:
+            has_issue = False
+            for item in order.items.all():
+                if item.product_id and stock_by_product.get(item.product_id, 0) < item.quantity:
+                    has_issue = True
+                    break
+            result[str(order.id)] = has_issue
+
+        return Response(result)
 
     @action(detail=True, methods=['post'], url_path='update-payment')
     def update_payment(self, request, pk=None):

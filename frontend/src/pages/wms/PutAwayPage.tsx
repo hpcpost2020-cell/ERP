@@ -4,10 +4,11 @@ import { purchasing, products as productApi } from '../../api/endpoints'
 import { useToast } from '../../components/ui/Toast'
 import StatusBadge from '../../components/ui/StatusBadge'
 import Loading from '../../components/ui/Loading'
-import { ScanLine, CheckCircle2, ArrowRight, Package } from 'lucide-react'
+import { ScanLine, CheckCircle2, ArrowRight, Package, Inbox } from 'lucide-react'
 
 interface QcItem {
   id: number
+  product_id: number
   product_sku: string
   product_title: string
   product_barcode: string
@@ -16,11 +17,11 @@ interface QcItem {
   qc_checked_at: string
 }
 
-interface Location { id: number; code: string; name: string }
+interface Location { id: number; code: string; name: string; is_receiving_bay?: boolean }
 
 export default function PutAwayPage() {
   const toast = useToast()
-  useQueryClient()
+  const qc = useQueryClient()
   const locInputRef = useRef<HTMLInputElement>(null)
 
   const [selectedItem, setSelectedItem] = useState<QcItem | null>(null)
@@ -43,24 +44,28 @@ export default function PutAwayPage() {
     .filter((i: QcItem) => !confirmed.includes(String(i.id)))
 
   const locs: Location[] = Array.isArray(locsData) ? locsData : locsData?.results || []
+  const recvBay = locs.find(l => l.is_receiving_bay)
+  const pickableLocs = locs.filter(l => !l.is_receiving_bay)
 
   const putAway = useMutation({
     mutationFn: async () => {
       if (!selectedItem || !targetLocCode) throw new Error('Missing item or location')
-      const loc = locs.find(l => l.code.toLowerCase() === targetLocCode.toLowerCase())
-      if (!loc) throw new Error(`Location not found: ${targetLocCode}`)
+      const targetLoc = locs.find(l => l.code.toLowerCase() === targetLocCode.toLowerCase())
+      if (!targetLoc) throw new Error(`Location not found: ${targetLocCode}`)
+      if (!recvBay) throw new Error('No receiving bay configured. Mark a location as receiving bay first.')
 
-      await productApi.adjust({
-        product_sku: selectedItem.product_sku,
-        location: loc.id,
+      await productApi.transfer({
+        product: selectedItem.product_id,
+        from_location: recvBay.id,
+        to_location: targetLoc.id,
         quantity: Number(qty),
-        notes: `Put-away from goods receipt QC — ${selectedItem.product_sku}`,
-        movement_type: 'adjustment',
+        notes: `Put-away: ${selectedItem.product_sku} from ${recvBay.code} to ${targetLoc.code}`,
       })
     },
     onSuccess: () => {
       toast(`Put away ${qty}× ${selectedItem?.product_sku} → ${targetLocCode.toUpperCase()}`, 'success')
       setConfirmed(p => [...p, String(selectedItem!.id)])
+      qc.invalidateQueries({ queryKey: ['qc-passed-items'] })
       setSelectedItem(null)
       setTargetLocCode('')
       setQty('1')
@@ -72,25 +77,38 @@ export default function PutAwayPage() {
     if (e.key === 'Enter') {
       const code = targetLocCode.trim().toUpperCase()
       const found = locs.find(l => l.code === code)
-      if (!found) {
-        toast(`Unknown location: ${code}`, 'error')
-      }
+      if (!found) toast(`Unknown location: ${code}`, 'error')
     }
   }
 
   const foundLoc = locs.find(l => l.code.toLowerCase() === targetLocCode.toLowerCase())
+  const canPutAway = !!foundLoc && !foundLoc.is_receiving_bay && !!selectedItem && Number(qty) > 0 && !!recvBay
 
   return (
     <div className="space-y-6">
       <div className="page-header">
         <div>
           <h1 className="page-title">Put-Away</h1>
-          <p className="page-subtitle">Place QC-passed goods into warehouse bin locations</p>
+          <p className="page-subtitle">Move QC-passed goods from receiving bay to warehouse bins</p>
         </div>
       </div>
 
+      {!recvBay && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          <Inbox className="w-5 h-5 shrink-0" />
+          No receiving bay location configured. Go to Locations and mark one as the receiving bay.
+        </div>
+      )}
+
+      {recvBay && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+          <Inbox className="w-5 h-5 shrink-0" />
+          Transferring from <strong className="font-mono mx-1">{recvBay.code}</strong> ({recvBay.name}) to target bin
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: QC passed items needing put-away */}
+        {/* Left: QC passed items */}
         <div className="card">
           <div className="card-header">
             <span className="font-semibold">QC Passed — Awaiting Put-Away</span>
@@ -167,7 +185,7 @@ export default function PutAwayPage() {
               </div>
 
               <div>
-                <label className="label">Target Location (scan or type code) *</label>
+                <label className="label">Target Bin Location *</label>
                 <div className="relative">
                   <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
@@ -178,15 +196,19 @@ export default function PutAwayPage() {
                     onChange={e => setTargetLocCode(e.target.value)}
                     onKeyDown={handleLocScan}
                     list="loc-list"
+                    autoFocus
                   />
                   <datalist id="loc-list">
-                    {locs.map(l => <option key={l.id} value={l.code}>{l.name}</option>)}
+                    {pickableLocs.map(l => <option key={l.id} value={l.code}>{l.name}</option>)}
                   </datalist>
                 </div>
-                {targetLocCode && foundLoc && (
+                {targetLocCode && foundLoc && !foundLoc.is_receiving_bay && (
                   <p className="text-sm text-green-600 mt-1 flex items-center gap-1">
                     <CheckCircle2 className="w-4 h-4" /> {foundLoc.name}
                   </p>
+                )}
+                {targetLocCode && foundLoc?.is_receiving_bay && (
+                  <p className="text-sm text-amber-600 mt-1">Cannot put away to the receiving bay itself</p>
                 )}
                 {targetLocCode && !foundLoc && (
                   <p className="text-sm text-red-600 mt-1">Unknown location code</p>
@@ -198,38 +220,39 @@ export default function PutAwayPage() {
                 <label className="label text-xs text-gray-400">Or select from list</label>
                 <select
                   className="select text-sm"
-                  value={foundLoc ? String(foundLoc.id) : ''}
+                  value={foundLoc && !foundLoc.is_receiving_bay ? String(foundLoc.id) : ''}
                   onChange={e => {
                     const loc = locs.find(l => String(l.id) === e.target.value)
                     if (loc) setTargetLocCode(loc.code)
                   }}
                 >
-                  <option value="">— Select location —</option>
-                  {locs.map(l => <option key={l.id} value={l.id}>{l.code} – {l.name}</option>)}
+                  <option value="">— Select bin location —</option>
+                  {pickableLocs.map(l => <option key={l.id} value={l.id}>{l.code} – {l.name}</option>)}
                 </select>
               </div>
 
               <button
                 className="btn-primary w-full py-3 text-base flex items-center justify-center gap-2"
                 onClick={() => putAway.mutate()}
-                disabled={!foundLoc || !qty || putAway.isPending}
+                disabled={!canPutAway || putAway.isPending}
               >
                 <ArrowRight className="w-5 h-5" />
-                {putAway.isPending ? 'Saving...' : `Put Away ${qty} × ${selectedItem.product_sku} → ${targetLocCode.toUpperCase() || '?'}`}
+                {putAway.isPending
+                  ? 'Saving...'
+                  : `Put Away ${qty} × ${selectedItem.product_sku} → ${targetLocCode.toUpperCase() || '?'}`}
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Recent put-aways */}
       {confirmed.length > 0 && (
         <div className="card card-body">
           <h3 className="font-semibold mb-3 text-green-700 flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5" /> Completed This Session ({confirmed.length})
           </h3>
           <p className="text-sm text-gray-500">
-            {confirmed.length} item{confirmed.length !== 1 ? 's' : ''} put away. Refresh to see updated stock levels.
+            {confirmed.length} item{confirmed.length !== 1 ? 's' : ''} put away. Stock transferred from {recvBay?.code || 'RECV'} to bin locations.
           </p>
         </div>
       )}

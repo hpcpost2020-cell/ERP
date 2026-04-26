@@ -10,7 +10,7 @@ from .models import Category, Product, ChannelListing, StockLocation, StockLevel
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductListSerializer,
     StockLocationSerializer, StockLevelSerializer, StockMovementSerializer,
-    StockAdjustmentSerializer, ChannelListingSerializer,
+    StockAdjustmentSerializer, StockTransferSerializer, ChannelListingSerializer,
     UnitOfMeasureSerializer, UoMConversionSerializer,
 )
 
@@ -170,3 +170,76 @@ class StockMovementViewSet(viewsets.ReadOnlyModelViewSet):
                    {'qty_before': qty_before, 'qty_after': level.qty_on_hand, 'notes': notes})
 
         return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='transfer')
+    def transfer(self, request):
+        serializer = StockTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        product = data['product']
+        from_location = data['from_location']
+        to_location = data['to_location']
+        quantity = data['quantity']
+        notes = data.get('notes', '')
+
+        with transaction.atomic():
+            from_level, _ = StockLevel.objects.select_for_update().get_or_create(
+                product=product, location=from_location,
+                defaults={'qty_on_hand': 0}
+            )
+            if from_level.qty_on_hand < quantity:
+                return Response(
+                    {'detail': f'Insufficient stock at {from_location.code}: '
+                               f'{from_level.qty_on_hand} available, {quantity} requested.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            from_before = from_level.qty_on_hand
+            from_level.qty_on_hand -= quantity
+            from_level.save(update_fields=['qty_on_hand'])
+
+            to_level, _ = StockLevel.objects.select_for_update().get_or_create(
+                product=product, location=to_location,
+                defaults={'qty_on_hand': 0}
+            )
+            to_before = to_level.qty_on_hand
+            to_level.qty_on_hand += quantity
+            to_level.save(update_fields=['qty_on_hand'])
+
+            import uuid
+            ref = f"TRF-{uuid.uuid4().hex[:8].upper()}"
+            from_note = notes or f"Transfer to {to_location.code}"
+            to_note = notes or f"Transfer from {from_location.code}"
+
+            from_movement = StockMovement.objects.create(
+                product=product, location=from_location,
+                movement_type=StockMovement.TYPE_TRANSFER,
+                quantity=-quantity,
+                qty_before=from_before, qty_after=from_level.qty_on_hand,
+                reference_type='transfer', reference_number=ref,
+                notes=from_note, created_by=request.user,
+            )
+            to_movement = StockMovement.objects.create(
+                product=product, location=to_location,
+                movement_type=StockMovement.TYPE_TRANSFER,
+                quantity=quantity,
+                qty_before=to_before, qty_after=to_level.qty_on_hand,
+                reference_type='transfer', reference_number=ref,
+                notes=to_note, created_by=request.user,
+            )
+
+        from audit.utils import log_action
+        log_action(request, 'update', 'StockLevel', ref,
+                   f"{product.sku}: transferred {quantity} from {from_location.code} to {to_location.code}",
+                   {'from': from_location.code, 'to': to_location.code,
+                    'qty': quantity, 'reference': ref})
+
+        return Response({
+            'reference': ref,
+            'product_sku': product.sku,
+            'quantity': quantity,
+            'from_location': from_location.code,
+            'to_location': to_location.code,
+            'from_movement': StockMovementSerializer(from_movement).data,
+            'to_movement': StockMovementSerializer(to_movement).data,
+        }, status=status.HTTP_201_CREATED)

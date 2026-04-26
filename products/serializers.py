@@ -40,7 +40,7 @@ class ChannelListingNestedSerializer(serializers.ModelSerializer):
 class StockLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockLocation
-        fields = ['id', 'code', 'name', 'description', 'is_active']
+        fields = ['id', 'code', 'name', 'description', 'is_active', 'is_receiving_bay']
         read_only_fields = ['id']
 
 
@@ -87,6 +87,19 @@ class StockAdjustmentSerializer(serializers.Serializer):
     quantity = serializers.IntegerField()
     notes = serializers.CharField(required=False, allow_blank=True)
     unit_cost = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
+
+
+class StockTransferSerializer(serializers.Serializer):
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
+    from_location = serializers.PrimaryKeyRelatedField(queryset=StockLocation.objects.all())
+    to_location = serializers.PrimaryKeyRelatedField(queryset=StockLocation.objects.all())
+    quantity = serializers.IntegerField(min_value=1)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        if data['from_location'] == data['to_location']:
+            raise serializers.ValidationError('Source and destination locations must be different.')
+        return data
 
 
 class ProductSerializer(serializers.ModelSerializer):

@@ -19,6 +19,7 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
 
 
 class GoodsReceiptItemSerializer(serializers.ModelSerializer):
+    product_id = serializers.IntegerField(source='po_item.product.id', read_only=True)
     product_sku = serializers.CharField(source='po_item.product.sku', read_only=True)
     product_title = serializers.CharField(source='po_item.product.title', read_only=True)
     product_barcode = serializers.CharField(source='po_item.product.barcode', read_only=True)
@@ -28,7 +29,7 @@ class GoodsReceiptItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = GoodsReceiptItem
         fields = [
-            'id', 'po_item', 'product_sku', 'product_title', 'product_barcode',
+            'id', 'po_item', 'product_id', 'product_sku', 'product_title', 'product_barcode',
             'qty_received', 'qty_damaged', 'notes',
             'qc_status', 'qc_checked_by', 'qc_checked_by_name',
             'qc_checked_at', 'qc_notes', 'qc_fail_reason', 'is_available_for_stock',

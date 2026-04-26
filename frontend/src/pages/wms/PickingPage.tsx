@@ -48,8 +48,17 @@ export default function PickingPage() {
     staleTime: 60000,
   })
 
+  const { data: stockStatusData } = useQuery({
+    queryKey: ['stock-status', statusFilter],
+    queryFn: () => sales.stockStatus({ status: statusFilter }).then(r => r.data),
+    staleTime: 60000,
+    refetchInterval: 60000,
+    enabled: !!statusFilter,
+  })
+
   const orders: SalesOrder[] = Array.isArray(ordersData) ? ordersData : ordersData?.results || []
   const stockLevels: StockLevel[] = Array.isArray(stockData) ? stockData : stockData?.results || []
+  const stockStatus: Record<string, boolean> = stockStatusData || {}
 
   return (
     <div className="space-y-4">
@@ -87,10 +96,10 @@ export default function PickingPage() {
           <div className="divide-y divide-gray-100">
             {orders.map(order => {
               const isExpanded = expandedOrder === order.id
+              const hasStockIssue = stockStatus[String(order.id)] === true
 
               return (
                 <div key={order.id}>
-                  {/* Order header row */}
                   <div
                     className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-gray-50"
                     onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
@@ -104,6 +113,11 @@ export default function PickingPage() {
                         <span className="font-mono text-sm font-semibold">{order.order_number}</span>
                         <span className="text-sm text-gray-700 truncate">{order.customer_name}</span>
                         <StatusBadge status={order.status} />
+                        {hasStockIssue && (
+                          <span className="badge badge-red text-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> Stock short
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-xs text-gray-400">
                         <span>{fmt.shortDate(order.created_at)}</span>
@@ -124,7 +138,6 @@ export default function PickingPage() {
                     </div>
                   </div>
 
-                  {/* Expanded pick lines */}
                   {isExpanded && (
                     <div className="border-t border-gray-100 bg-gray-50">
                       <PickLines order={order} stockLevels={stockLevels} />

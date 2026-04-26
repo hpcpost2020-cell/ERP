@@ -121,6 +121,10 @@ class StockLocation(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    is_receiving_bay = models.BooleanField(
+        default=False,
+        help_text='Mark as the primary receiving/QC location for incoming goods'
+    )
 
     class Meta:
         ordering = ['code']

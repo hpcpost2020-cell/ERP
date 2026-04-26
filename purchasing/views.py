@@ -55,9 +55,12 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             receipt = serializer.save(purchase_order=po, received_by=request.user)
 
-            default_location = None
             from products.models import StockLocation
-            default_location = StockLocation.objects.filter(is_active=True).first()
+            # Prefer the designated receiving bay; fall back to first active location
+            default_location = (
+                StockLocation.objects.filter(is_receiving_bay=True, is_active=True).first()
+                or StockLocation.objects.filter(is_active=True).first()
+            )
 
             for receipt_item in receipt.items.all():
                 po_item = receipt_item.po_item
