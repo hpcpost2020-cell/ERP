@@ -56,6 +56,10 @@ export const customers = {
   invoices: (id: number) => api.get(`/customers/${id}/invoices/`),
   notes: (params?: Record<string, unknown>) => api.get('/customers/notes/', { params }),
   addNote: (data: unknown) => api.post('/customers/notes/', data),
+  addresses: (customerId: number) => api.get('/customers/addresses/', { params: { customer: customerId } }),
+  addAddress: (data: unknown) => api.post('/customers/addresses/', data),
+  updateAddress: (id: number, data: unknown) => api.patch(`/customers/addresses/${id}/`, data),
+  deleteAddress: (id: number) => api.delete(`/customers/addresses/${id}/`),
 }
 
 export const sales = {

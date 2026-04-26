@@ -84,7 +84,6 @@ export default function CustomerFormModal({ id, onClose }: Props) {
                   <option value="retail">Retail</option>
                   <option value="wholesale">Wholesale</option>
                   <option value="marketplace">Marketplace</option>
-                  <option value="trade">Trade</option>
                 </select>
               </div>
             </div>
@@ -94,6 +93,7 @@ export default function CustomerFormModal({ id, onClose }: Props) {
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
                   <option value="on_hold">On Hold</option>
+                  <option value="blacklisted">Blacklisted</option>
                 </select>
               </div>
               <div><label className="label">Payment Terms</label>

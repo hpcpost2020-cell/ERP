@@ -20,6 +20,7 @@ import SalesOrderDetailPage from './pages/sales/SalesOrderDetailPage'
 import SalesOrderFormPage from './pages/sales/SalesOrderFormPage'
 import ShippingPage from './pages/shipping/ShippingPage'
 import InvoicingPage from './pages/invoicing/InvoicingPage'
+import InvoiceDetailPage from './pages/invoicing/InvoiceDetailPage'
 import ReturnsPage from './pages/returns/ReturnsPage'
 import ReportsPage from './pages/reports/ReportsPage'
 import UsersPage from './pages/users/UsersPage'
@@ -60,6 +61,7 @@ function AppRoutes() {
         <Route path="sales/:id" element={<SalesOrderDetailPage />} />
         <Route path="shipping" element={<ShippingPage />} />
         <Route path="invoicing" element={<InvoicingPage />} />
+        <Route path="invoicing/:id" element={<InvoiceDetailPage />} />
         <Route path="returns" element={<ReturnsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="users" element={<UsersPage />} />

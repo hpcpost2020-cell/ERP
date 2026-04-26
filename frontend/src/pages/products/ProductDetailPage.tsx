@@ -159,15 +159,18 @@ export default function ProductDetailPage() {
 
       {tab === 'movements' && (
         <div className="card">
-          <div className="card-header"><span className="font-semibold">Stock Movements</span></div>
-          {!movements?.results?.length ? (
+          <div className="card-header">
+            <span className="font-semibold">Stock Movements</span>
+            {Array.isArray(movements) && movements.length > 0 && <span className="text-xs text-gray-400">Showing last {Math.min(movements.length, 100)}</span>}
+          </div>
+          {!(Array.isArray(movements) ? movements : movements?.results || []).length ? (
             <div className="p-8 text-center text-gray-400">No movements recorded</div>
           ) : (
             <div className="table-container">
               <table>
                 <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Before</th><th>After</th><th>Reference</th><th>Notes</th></tr></thead>
                 <tbody>
-                  {movements.results?.map((m: { id: number; created_at: string; movement_type: string; quantity: number; qty_before: number; qty_after: number; reference_number: string; notes: string }) => (
+                  {(Array.isArray(movements) ? movements : movements?.results || []).slice(0, 100).map((m: { id: number; created_at: string; movement_type: string; quantity: number; qty_before: number; qty_after: number; reference_number: string; notes: string }) => (
                     <tr key={m.id}>
                       <td className="text-xs text-gray-500">{fmt.shortDate(m.created_at)}</td>
                       <td><span className={`badge ${m.movement_type === 'inward' ? 'badge-green' : m.movement_type === 'outward' ? 'badge-red' : 'badge-blue'}`}>{m.movement_type}</span></td>

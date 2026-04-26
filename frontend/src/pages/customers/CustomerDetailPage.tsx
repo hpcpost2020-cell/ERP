@@ -7,9 +7,95 @@ import Loading from '../../components/ui/Loading'
 import StatusBadge from '../../components/ui/StatusBadge'
 import { useToast } from '../../components/ui/Toast'
 import CustomerFormModal from './CustomerFormModal'
-import { ArrowLeft, Edit, ShoppingCart, MessageSquare, Star } from 'lucide-react'
+import { ArrowLeft, Edit, ShoppingCart, MessageSquare, Star, MapPin, Plus, Trash2, X } from 'lucide-react'
 
-type Tab = 'overview' | 'orders' | 'notes'
+type Tab = 'overview' | 'orders' | 'notes' | 'addresses'
+
+interface Address {
+  id: number
+  address_type: string
+  is_default: boolean
+  address_line1: string
+  address_line2: string
+  city: string
+  county: string
+  postcode: string
+  country: string
+}
+
+function AddressForm({ custId, addr, onDone }: { custId: number; addr?: Address; onDone: () => void }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [form, setForm] = useState({
+    address_type: addr?.address_type || 'billing',
+    is_default: addr?.is_default || false,
+    address_line1: addr?.address_line1 || '',
+    address_line2: addr?.address_line2 || '',
+    city: addr?.city || '',
+    county: addr?.county || '',
+    postcode: addr?.postcode || '',
+    country: addr?.country || 'GB',
+  })
+
+  const save = useMutation({
+    mutationFn: () => addr
+      ? customersApi.updateAddress(addr.id, { ...form, customer: custId })
+      : customersApi.addAddress({ ...form, customer: custId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-addresses', custId] })
+      toast(addr ? 'Address updated' : 'Address added', 'success')
+      onDone()
+    },
+    onError: () => toast('Failed to save address', 'error'),
+  })
+
+  const set = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target
+    setForm(p => ({ ...p, [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value }))
+  }
+
+  return (
+    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="font-medium text-sm">{addr ? 'Edit Address' : 'New Address'}</h4>
+        <button onClick={onDone} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Type</label>
+          <select name="address_type" value={form.address_type} onChange={set} className="select">
+            <option value="billing">Billing</option>
+            <option value="shipping">Shipping</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div className="flex items-end pb-1">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox" name="is_default" checked={form.is_default}
+              onChange={e => setForm(p => ({ ...p, is_default: e.target.checked }))} className="rounded" />
+            Set as default
+          </label>
+        </div>
+      </div>
+      <div><label className="label">Address Line 1</label><input name="address_line1" value={form.address_line1} onChange={set} className="input" /></div>
+      <div><label className="label">Address Line 2</label><input name="address_line2" value={form.address_line2} onChange={set} className="input" /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="label">City</label><input name="city" value={form.city} onChange={set} className="input" /></div>
+        <div><label className="label">County</label><input name="county" value={form.county} onChange={set} className="input" /></div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className="label">Postcode</label><input name="postcode" value={form.postcode} onChange={set} className="input" /></div>
+        <div><label className="label">Country</label><input name="country" value={form.country} onChange={set} className="input" /></div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onDone} className="btn-secondary">Cancel</button>
+        <button type="button" onClick={() => save.mutate()} className="btn-primary" disabled={save.isPending}>
+          {save.isPending ? 'Saving...' : 'Save Address'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -21,6 +107,8 @@ export default function CustomerDetailPage() {
   const [showEdit, setShowEdit] = useState(false)
   const [note, setNote] = useState('')
   const [noteImportant, setNoteImportant] = useState(false)
+  const [showAddAddr, setShowAddAddr] = useState(false)
+  const [editAddrId, setEditAddrId] = useState<number | null>(null)
 
   const { data: customer, isLoading } = useQuery({
     queryKey: ['customer', custId],
@@ -31,6 +119,12 @@ export default function CustomerDetailPage() {
     queryKey: ['customer-orders', custId],
     queryFn: () => customersApi.orders(custId).then(r => r.data),
     enabled: tab === 'orders',
+  })
+
+  const { data: addresses } = useQuery({
+    queryKey: ['customer-addresses', custId],
+    queryFn: () => customersApi.addresses(custId).then(r => r.data),
+    enabled: tab === 'addresses',
   })
 
   const addNoteMut = useMutation({
@@ -44,12 +138,24 @@ export default function CustomerDetailPage() {
     onError: () => toast('Failed to add note', 'error'),
   })
 
+  const deleteAddr = useMutation({
+    mutationFn: (addrId: number) => customersApi.deleteAddress(addrId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-addresses', custId] })
+      toast('Address deleted', 'success')
+    },
+    onError: () => toast('Failed to delete address', 'error'),
+  })
+
   if (isLoading) return <Loading />
   if (!customer) return <div className="text-red-500 p-8">Customer not found</div>
+
+  const addrList: Address[] = Array.isArray(addresses) ? addresses : addresses?.results || []
 
   const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
     { key: 'overview', label: 'Overview', icon: Edit },
     { key: 'orders', label: 'Orders', icon: ShoppingCart },
+    { key: 'addresses', label: 'Addresses', icon: MapPin },
     { key: 'notes', label: `Notes (${customer.customer_notes?.length || 0})`, icon: MessageSquare },
   ]
 
@@ -124,25 +230,6 @@ export default function CustomerDetailPage() {
               <p className="text-sm text-gray-600">{customer.notes}</p>
             </div>
           )}
-          {customer.addresses?.length > 0 && (
-            <div className="card card-body lg:col-span-2">
-              <h3 className="font-semibold mb-3">Addresses</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {customer.addresses.map((a: { id: number; address_type: string; is_default: boolean; address_line1: string; address_line2: string; city: string; county: string; postcode: string; country: string }) => (
-                  <div key={a.id} className="text-sm p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="badge badge-blue capitalize">{a.address_type}</span>
-                      {a.is_default && <span className="badge badge-green text-xs">Default</span>}
-                    </div>
-                    <div className="text-gray-600">{a.address_line1}</div>
-                    {a.address_line2 && <div className="text-gray-600">{a.address_line2}</div>}
-                    <div className="text-gray-600">{a.city}{a.county ? `, ${a.county}` : ''}</div>
-                    <div className="text-gray-600">{a.postcode} {a.country}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -170,6 +257,56 @@ export default function CustomerDetailPage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'addresses' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="font-semibold">Addresses</h3>
+            {!showAddAddr && editAddrId === null && (
+              <button className="btn-primary btn-sm" onClick={() => setShowAddAddr(true)}>
+                <Plus className="w-4 h-4" /> Add Address
+              </button>
+            )}
+          </div>
+          {showAddAddr && (
+            <AddressForm custId={custId} onDone={() => setShowAddAddr(false)} />
+          )}
+          {addrList.length === 0 && !showAddAddr && (
+            <div className="card p-8 text-center text-gray-400">No addresses saved</div>
+          )}
+          {addrList.map((a: Address) => (
+            editAddrId === a.id ? (
+              <AddressForm key={a.id} custId={custId} addr={a} onDone={() => setEditAddrId(null)} />
+            ) : (
+              <div key={a.id} className="card card-body">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="badge badge-blue capitalize">{a.address_type}</span>
+                      {a.is_default && <span className="badge badge-green text-xs">Default</span>}
+                    </div>
+                    <div className="text-sm text-gray-700 space-y-0.5">
+                      <div>{a.address_line1}</div>
+                      {a.address_line2 && <div>{a.address_line2}</div>}
+                      <div>{a.city}{a.county ? `, ${a.county}` : ''}</div>
+                      <div>{a.postcode} {a.country}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button className="btn btn-secondary btn-sm" onClick={() => { setShowAddAddr(false); setEditAddrId(a.id) }}>
+                      <Edit className="w-3 h-3" /> Edit
+                    </button>
+                    <button className="btn btn-secondary btn-sm text-red-600 hover:bg-red-50"
+                      onClick={() => window.confirm('Delete this address?') && deleteAddr.mutate(a.id)}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          ))}
         </div>
       )}
 
