@@ -187,11 +187,12 @@ export default function ChannelDetailPage() {
   })
   const skuMappings: SkuMapping[] = Array.isArray(skuMappingsData) ? skuMappingsData : []
 
-  const { data: _unmatchedData } = useQuery({
+  const { data: unmatchedData, refetch: refetchUnmatched } = useQuery({
     queryKey: ['channel-unmatched-orders', channelId],
     queryFn: () => channelsApi.unmatchedOrders(channelId).then(r => r.data as UnmatchedOrder[]),
     enabled: !!channel,
   })
+  const unmatchedOrders: UnmatchedOrder[] = Array.isArray(unmatchedData) ? unmatchedData : []
 
   // Credentials save
   const credMut = useMutation({
@@ -241,6 +242,8 @@ export default function ChannelDetailPage() {
       qc.invalidateQueries({ queryKey: ['channel', channelId] })
       refetchLogs()
       refetchMpOrders()
+      refetchUnmatched()
+      refetchSkuMappings()
     },
     onError: (err: unknown) => {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Sync failed'
@@ -618,7 +621,65 @@ export default function ChannelDetailPage() {
           </div>
         )}
         {tab === 'unmatched' && (
-          <div className="p-8 text-center text-sm text-gray-400">Unmatched Orders tab — coming in Step 4</div>
+          <div className="divide-y divide-gray-100">
+            <div className="px-5 py-3 bg-gray-50 flex items-center justify-between">
+              <p className="text-sm text-gray-600">
+                <strong>{unmatchedOrders.length}</strong> order{unmatchedOrders.length !== 1 ? 's' : ''} with unmatched items
+              </p>
+              <button
+                onClick={() => refetchUnmatched()}
+                className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" /> Refresh
+              </button>
+            </div>
+
+            {unmatchedOrders.length === 0 ? (
+              <div className="p-8 text-center text-sm text-gray-400">
+                <CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                No unmatched orders. All imported items have been matched to ERP products.
+              </div>
+            ) : (
+              <>
+                <div className="px-5 py-3 bg-amber-50 text-amber-800 text-sm flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    These orders were imported but one or more line items could not be matched to an ERP product.
+                    Go to the <button className="underline font-semibold" onClick={() => setTab('skus')}>SKU Mapping tab</button> to add mappings.
+                    Once a mapping is created, re-import orders to link the items.
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+                        <th className="px-4 py-2.5 text-left font-medium">WC Order #</th>
+                        <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                        <th className="px-4 py-2.5 text-left font-medium">Fetched</th>
+                        <th className="px-4 py-2.5 text-left font-medium">Error / Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {unmatchedOrders.map(o => (
+                        <tr key={o.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 font-mono font-bold text-gray-800">
+                            #{o.external_order_number || o.external_order_id}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <ImportStatusPill status={o.status} />
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-gray-400">{timeAgo(o.fetched_at)}</td>
+                          <td className="px-4 py-2.5 text-xs text-red-600 max-w-xs">
+                            {o.error_message || <span className="text-gray-400">No error message</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
         )}
         {tab === 'logs' && (
           <div className="p-8 text-center text-sm text-gray-400">Sync Logs tab — coming in Step 5</div>
