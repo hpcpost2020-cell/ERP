@@ -88,7 +88,31 @@ class ChannelSerializer(serializers.ModelSerializer):
                 ),
             }
         if obj.channel_type == 'ebay':
-            return {'is_configured': bool(creds.get('app_id'))}
+            from datetime import datetime, timezone as _tz
+            app_id = creds.get('app_id', '')
+            has_token = bool(creds.get('access_token'))
+            has_refresh = bool(creds.get('refresh_token'))
+            expires_at = creds.get('token_expires_at', '')
+            token_valid = False
+            if has_token and expires_at:
+                try:
+                    exp = datetime.fromisoformat(expires_at)
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=_tz.utc)
+                    token_valid = datetime.now(_tz.utc) < exp
+                except ValueError:
+                    pass
+            return {
+                'app_id_hint': (app_id[:8] + '…') if len(app_id) > 8 else app_id,
+                'has_token': has_token,
+                'has_refresh_token': has_refresh,
+                'token_valid': token_valid,
+                'token_expires_at': expires_at,
+                'refresh_token_expires_at': creds.get('refresh_token_expires_at', ''),
+                'sandbox': bool(creds.get('sandbox', False)),
+                'marketplace_id': creds.get('marketplace_id', 'EBAY_GB'),
+                'is_configured': bool(app_id and has_token),
+            }
         if obj.channel_type == 'amazon':
             return {'is_configured': bool(creds.get('seller_id'))}
         return {'is_configured': bool(creds)}

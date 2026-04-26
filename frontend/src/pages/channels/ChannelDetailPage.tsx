@@ -11,9 +11,20 @@ import {
 type Tab = 'overview' | 'credentials' | 'skus' | 'unmatched' | 'logs' | 'tracking'
 
 interface CredentialsSummary {
+  // WooCommerce
   store_url?: string
   consumer_key_hint?: string
   has_secret?: boolean
+  // eBay
+  app_id_hint?: string
+  has_token?: boolean
+  has_refresh_token?: boolean
+  token_valid?: boolean
+  token_expires_at?: string
+  refresh_token_expires_at?: string
+  sandbox?: boolean
+  marketplace_id?: string
+  // shared
   is_configured?: boolean
 }
 
@@ -176,12 +187,23 @@ export default function ChannelDetailPage() {
 
   const [tab, setTab] = useState<Tab>('overview')
 
-  // Credentials form state
+  // WooCommerce credentials form state
   const [storeUrl, setStoreUrl] = useState('')
   const [consumerKey, setConsumerKey] = useState('')
   const [consumerSecret, setConsumerSecret] = useState('')
   const [credSaved, setCredSaved] = useState(false)
   const [credError, setCredError] = useState('')
+
+  // eBay credentials form state
+  const [ebayAppId, setEbayAppId] = useState('')
+  const [ebayCertId, setEbayCertId] = useState('')
+  const [ebayRuName, setEbayRuName] = useState('')
+  const [ebayMarketplace, setEbayMarketplace] = useState('EBAY_GB')
+  const [ebaySandbox, setEbaySandbox] = useState(false)
+  const [ebayAuthUrl, setEbayAuthUrl] = useState('')
+  const [ebayCode, setEbayCode] = useState('')
+  const [ebayCodeResult, setEbayCodeResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [ebayCredSaved, setEbayCredSaved] = useState(false)
 
   // Push tracking form
   const [trackingOrderId, setTrackingOrderId] = useState('')
@@ -261,6 +283,42 @@ export default function ChannelDetailPage() {
     if (consumerSecret.trim()) payload.consumer_secret = consumerSecret.trim()
     credMut.mutate(payload)
   }
+
+  // eBay: save App ID / Cert ID / RuName
+  const ebayCredMut = useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      channelsApi.setCredentials(channelId, data).then(r => r.data),
+    onSuccess: () => {
+      setEbayCredSaved(true)
+      qc.invalidateQueries({ queryKey: ['channel', channelId] })
+      setTimeout(() => setEbayCredSaved(false), 3000)
+    },
+  })
+
+  // eBay: generate auth URL
+  const ebayAuthUrlMut = useMutation({
+    mutationFn: () => channelsApi.ebayAuthUrl(channelId).then(r => r.data as { auth_url: string }),
+    onSuccess: (data) => setEbayAuthUrl(data.auth_url),
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to generate URL'
+      setEbayCodeResult({ ok: false, message: msg })
+    },
+  })
+
+  // eBay: exchange authorization code for tokens
+  const ebayExchangeMut = useMutation({
+    mutationFn: (code: string) => channelsApi.ebayExchangeCode(channelId, { code }).then(r => r.data),
+    onSuccess: (data) => {
+      setEbayCodeResult({ ok: true, message: data.message })
+      setEbayCode('')
+      setEbayAuthUrl('')
+      qc.invalidateQueries({ queryKey: ['channel', channelId] })
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Code exchange failed'
+      setEbayCodeResult({ ok: false, message: msg })
+    },
+  })
 
   // Test connection
   const testMut = useMutation({
@@ -364,6 +422,7 @@ export default function ChannelDetailPage() {
 
   const cs = channel.credentials_summary || {}
   const isWC = channel.channel_type === 'woocommerce'
+  const isEbay = channel.channel_type === 'ebay'
 
   const tabClass = (t: Tab) =>
     `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
@@ -416,7 +475,215 @@ export default function ChannelDetailPage() {
         {/* Placeholder panels for tabs not yet implemented */}
         {tab === 'credentials' && (
           <div className="p-5 space-y-6">
-            {/* How to generate API keys */}
+
+            {/* ── eBay OAuth setup ─────────────────────────────────────── */}
+            {isEbay && (
+              <>
+                {/* Instructions */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
+                    <Tag className="w-4 h-4" /> How to connect your eBay seller account
+                  </h3>
+                  <ol className="text-sm text-blue-700 space-y-1.5 list-decimal list-inside">
+                    <li>Register at <strong>developer.ebay.com</strong> and create a production application</li>
+                    <li>Copy your <strong>App ID</strong> (Client ID), <strong>Cert ID</strong> (Client Secret), and <strong>Dev ID</strong> from the "Application Keys" page</li>
+                    <li>In your eBay app settings, add an <strong>OAuth User Token</strong> with scopes: <code className="text-xs bg-blue-100 px-1 rounded">sell.fulfillment sell.inventory</code></li>
+                    <li>Set a <strong>RuName</strong> (Redirect URI Name) — for a local ERP you can use any HTTPS URL you control, or the eBay sandbox test URL</li>
+                    <li>Enter App ID, Cert ID, and RuName below, then click <strong>Save App Credentials</strong></li>
+                    <li>Click <strong>Generate Auth URL</strong>, visit the URL in your browser, sign in as the seller, and grant access</li>
+                    <li>eBay will redirect to your RuName with <code className="text-xs bg-blue-100 px-1 rounded">?code=v^1.1...</code> in the URL — copy that code value</li>
+                    <li>Paste the code into the "Exchange Code" box below and click <strong>Exchange Code</strong></li>
+                  </ol>
+                </div>
+
+                {/* Token status */}
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-gray-700">Current token status</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-400">App ID</span>
+                      <p className="font-mono text-gray-800 mt-0.5">{cs.app_id_hint || <span className="text-gray-400 font-sans">Not set</span>}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Mode</span>
+                      <p className="mt-0.5">
+                        {cs.sandbox
+                          ? <span className="text-amber-600 font-semibold">Sandbox</span>
+                          : <span className="text-green-700 font-semibold">Production</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Access Token</span>
+                      <p className="mt-0.5">
+                        {cs.has_token
+                          ? cs.token_valid
+                            ? <span className="text-green-700 font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Valid</span>
+                            : <span className="text-red-600 font-semibold flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Expired</span>
+                          : <span className="text-gray-400">Not set</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Refresh Token</span>
+                      <p className="mt-0.5">
+                        {cs.has_refresh_token
+                          ? <span className="text-green-700 font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Stored</span>
+                          : <span className="text-gray-400">Not stored</span>}
+                      </p>
+                    </div>
+                    {cs.token_expires_at && (
+                      <div className="col-span-2">
+                        <span className="text-gray-400">Token expires</span>
+                        <p className="text-gray-600 mt-0.5 text-xs font-mono">{cs.token_expires_at}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Step 1: App credentials */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-gray-700">Step 1 — App Credentials</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">App ID (Client ID)</label>
+                      <input
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={ebayAppId} onChange={e => setEbayAppId(e.target.value)}
+                        placeholder={cs.app_id_hint || 'MyApp-12345-abc...'}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Cert ID (Client Secret)</label>
+                      <input
+                        type="password"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={ebayCertId} onChange={e => setEbayCertId(e.target.value)}
+                        placeholder="SBX-abc123... or PRD-abc123..."
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">RuName (OAuth Redirect URI Name)</label>
+                      <input
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={ebayRuName} onChange={e => setEbayRuName(e.target.value)}
+                        placeholder="MyApp-MyApp-abc-xyz"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Marketplace</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                        value={ebayMarketplace} onChange={e => setEbayMarketplace(e.target.value)}
+                      >
+                        <option value="EBAY_GB">eBay UK (EBAY_GB)</option>
+                        <option value="EBAY_US">eBay US (EBAY_US)</option>
+                        <option value="EBAY_DE">eBay Germany (EBAY_DE)</option>
+                        <option value="EBAY_FR">eBay France (EBAY_FR)</option>
+                        <option value="EBAY_IT">eBay Italy (EBAY_IT)</option>
+                        <option value="EBAY_ES">eBay Spain (EBAY_ES)</option>
+                        <option value="EBAY_AU">eBay Australia (EBAY_AU)</option>
+                        <option value="EBAY_CA">eBay Canada (EBAY_CA)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="ebaySandbox" checked={ebaySandbox} onChange={e => setEbaySandbox(e.target.checked)} className="rounded" />
+                    <label htmlFor="ebaySandbox" className="text-sm text-gray-600">Use Sandbox (testing only)</label>
+                  </div>
+                  {ebayCredSaved && (
+                    <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" /> App credentials saved.
+                    </p>
+                  )}
+                  <button
+                    onClick={() => {
+                      const payload: Record<string, unknown> = { marketplace_id: ebayMarketplace, sandbox: ebaySandbox }
+                      if (ebayAppId.trim()) payload.app_id = ebayAppId.trim()
+                      if (ebayCertId.trim()) payload.cert_id = ebayCertId.trim()
+                      if (ebayRuName.trim()) payload.ru_name = ebayRuName.trim()
+                      ebayCredMut.mutate(payload)
+                    }}
+                    disabled={ebayCredMut.isPending}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50"
+                  >
+                    {ebayCredMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    {ebayCredMut.isPending ? 'Saving…' : 'Save App Credentials'}
+                  </button>
+                </div>
+
+                {/* Step 2: Generate auth URL */}
+                <div className="space-y-3 border-t border-gray-100 pt-4">
+                  <h3 className="text-sm font-semibold text-gray-700">Step 2 — Generate Auth URL &amp; Visit It</h3>
+                  <p className="text-xs text-gray-400">After saving App ID, Cert ID, and RuName above, generate the eBay consent URL and open it in your browser.</p>
+                  <button
+                    onClick={() => { setEbayAuthUrl(''); ebayAuthUrlMut.mutate() }}
+                    disabled={ebayAuthUrlMut.isPending || !cs.app_id_hint}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {ebayAuthUrlMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                    Generate Auth URL
+                  </button>
+                  {ebayAuthUrl && (
+                    <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                      <p className="text-xs font-medium text-gray-600">Open this URL in your browser and sign in as the seller:</p>
+                      <a
+                        href={ebayAuthUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-mono text-blue-600 hover:text-blue-800 break-all flex items-start gap-1"
+                      >
+                        {ebayAuthUrl} <ExternalLink className="w-3 h-3 shrink-0 mt-0.5" />
+                      </a>
+                      <p className="text-xs text-gray-400">After granting access, eBay redirects you to your RuName URL. Copy the <code className="bg-gray-200 px-1 rounded">code=</code> value from that URL.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Step 3: Exchange code */}
+                <div className="space-y-3 border-t border-gray-100 pt-4">
+                  <h3 className="text-sm font-semibold text-gray-700">Step 3 — Paste Authorization Code</h3>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    value={ebayCode}
+                    onChange={e => setEbayCode(e.target.value)}
+                    placeholder="v^1.1#i^1#p^3#f^0#..."
+                  />
+                  {ebayCodeResult && (
+                    <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 ${ebayCodeResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+                      {ebayCodeResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                      <span>{ebayCodeResult.message}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setEbayCodeResult(null); ebayExchangeMut.mutate(ebayCode.trim()) }}
+                      disabled={!ebayCode.trim() || ebayExchangeMut.isPending}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {ebayExchangeMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      {ebayExchangeMut.isPending ? 'Exchanging…' : 'Exchange Code'}
+                    </button>
+                    <button
+                      onClick={() => testMut.mutate()}
+                      disabled={testMut.isPending || !cs.is_configured}
+                      className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {testMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                      Test Connection
+                    </button>
+                  </div>
+                  {testResult && (
+                    <div className={`flex items-start gap-2 text-sm rounded-lg px-3 py-2 ${testResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+                      {testResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                      <span>{testResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* ── WooCommerce credentials ──────────────────────────────── */}
             {isWC && (
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
                 <h3 className="text-sm font-semibold text-blue-800 flex items-center gap-2">
@@ -541,7 +808,8 @@ export default function ChannelDetailPage() {
             <div className="p-4 bg-amber-50 text-amber-800 text-sm flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
-                <strong>Stock push safety:</strong> Only mappings marked <strong>Active</strong> will push stock to WooCommerce.
+                <strong>Stock push safety:</strong> Only mappings marked <strong>Active</strong> will push stock to {isEbay ? 'eBay' : 'WooCommerce'}.
+                {isEbay && <> For eBay, the <strong>Channel SKU</strong> column must contain the eBay Inventory API SKU (not the listing ID). Stock push uses the Inventory API.</>}
                 Auto-created mappings start as inactive. Review and activate each one after confirming the product match is correct.
               </span>
             </div>
@@ -762,9 +1030,9 @@ export default function ChannelDetailPage() {
         {tab === 'tracking' && (
           <div className="p-5 space-y-5">
             <p className="text-sm text-gray-500">
-              Push a tracking number and courier to WooCommerce for a specific order.
-              The order must have been imported from this channel and be dispatched in ERP.
-              This adds a customer-visible note and marks the WooCommerce order as completed.
+              {isEbay
+                ? 'Push a tracking number to eBay to mark an order as shipped. The order must have been imported from this channel and dispatched in ERP. This creates a shipping fulfillment record on eBay.'
+                : 'Push a tracking number and courier to WooCommerce for a specific order. The order must have been imported from this channel and be dispatched in ERP. This adds a customer-visible note and marks the WooCommerce order as completed.'}
             </p>
 
             <div className="space-y-3">
@@ -806,17 +1074,25 @@ export default function ChannelDetailPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
-                  Tracking URL <span className="text-gray-400">(optional override)</span>
-                </label>
-                <input
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
-                  placeholder="https://track.example.com/ABC123 — leave blank to auto-generate"
-                  value={trackingUrl}
-                  onChange={e => setTrackingUrl(e.target.value)}
-                />
-              </div>
+              {!isEbay && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+                    Tracking URL <span className="text-gray-400">(optional override)</span>
+                  </label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    placeholder="https://track.example.com/ABC123 — leave blank to auto-generate"
+                    value={trackingUrl}
+                    onChange={e => setTrackingUrl(e.target.value)}
+                  />
+                </div>
+              )}
+              {isEbay && (
+                <p className="text-xs text-gray-400 col-span-2">
+                  eBay carrier code is auto-detected from the courier name (e.g. "Royal Mail" → ROYALMAIL).
+                  If unrecognised, it defaults to OTHER.
+                </p>
+              )}
             </div>
 
             {trackingResult && (
@@ -846,7 +1122,7 @@ export default function ChannelDetailPage() {
               className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
             >
               {pushTrackingMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-              {pushTrackingMut.isPending ? 'Pushing…' : 'Push Tracking to WooCommerce'}
+              {pushTrackingMut.isPending ? 'Pushing…' : isEbay ? 'Push Tracking to eBay' : 'Push Tracking to WooCommerce'}
             </button>
           </div>
         )}
@@ -988,7 +1264,7 @@ export default function ChannelDetailPage() {
         {/* Push tracking */}
         <div className="border-t border-gray-100 pt-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Truck className="w-4 h-4" /> Push Tracking to WooCommerce
+            <Truck className="w-4 h-4" /> {isEbay ? 'Push Tracking to eBay' : 'Push Tracking to WooCommerce'}
           </h3>
           <div className="flex gap-2">
             <input

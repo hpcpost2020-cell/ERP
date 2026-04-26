@@ -497,3 +497,423 @@ def push_tracking_to_woocommerce(
     except WooCommerceError as exc:
         logger.error("Tracking push FAILED for WC#%d: %s", wc_order_id, exc)
         return {'success': False, 'error': str(exc)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# eBay sync
+# eBay item types stored in ChannelListing:
+#   simple product : external_id = legacyItemId,         parent_id = ""
+#   variation      : external_id = legacyVariationId,    parent_id = legacyItemId
+#   inventory sku  : external_sku = eBay inventory SKU (for Inventory API stock push)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_ebay_client(channel):
+    """Build EbayClient from channel.api_credentials. Raises ValueError on bad config."""
+    from .integrations.ebay import EbayClient, EbayError
+    try:
+        return EbayClient.from_channel(channel)
+    except EbayError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _find_or_create_ebay_customer(ship_to: dict, buyer: dict, user):
+    """Find an existing customer by email, or create a new marketplace customer."""
+    from customers.models import Customer
+    import random as _random
+
+    email = (
+        ship_to.get('email')
+        or buyer.get('buyerRegistrationAddress', {}).get('email', '')
+        or ''
+    ).strip().lower()
+
+    if email:
+        customer = Customer.objects.filter(email__iexact=email).first()
+        if customer:
+            return customer
+
+    full_name = ship_to.get('fullName', buyer.get('username', 'eBay Buyer'))
+    name_parts = full_name.split(' ', 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+    ts = timezone.now().strftime('%y%m%d%H%M%S')
+    cust_num = f'EB{ts}'
+    attempts = 0
+    while Customer.objects.filter(customer_number=cust_num).exists():
+        cust_num = f'EB{ts}{_random.randint(0, 999):03d}'
+        attempts += 1
+        if attempts > 50:
+            raise RuntimeError('Could not generate unique eBay customer number')
+
+    return Customer.objects.create(
+        customer_number=cust_num,
+        first_name=first_name,
+        last_name=last_name,
+        email=email or f'noemail+{cust_num.lower()}@import.local',
+        phone=ship_to.get('primaryPhone', {}).get('phoneNumber', ''),
+        customer_type=Customer.TYPE_MARKETPLACE,
+        source='ebay',
+        created_by=user,
+    )
+
+
+def _import_single_ebay_order(channel, ebay_order: dict, user) -> str:
+    """
+    Import a single eBay order from the Fulfillment API response.
+    Returns 'created' | 'duplicate' or raises on error.
+    """
+    from .models import MarketplaceOrder
+    from sales.models import SalesOrder, SalesOrderItem
+
+    order_id = ebay_order['orderId']
+    legacy_order_id = ebay_order.get('legacyOrderId', order_id)
+
+    # Duplicate guard
+    existing = MarketplaceOrder.objects.filter(
+        channel=channel, external_order_id=order_id
+    ).first()
+    if existing:
+        if (
+            existing.status == MarketplaceOrder.STATUS_IMPORTED
+            and existing.sales_order_id
+            and SalesOrder.objects.filter(pk=existing.sales_order_id).exists()
+        ):
+            return 'duplicate'
+        elif existing.status == MarketplaceOrder.STATUS_IMPORTED:
+            return 'duplicate'
+
+    # Resolve shipping address from fulfillmentStartInstructions
+    instructions = ebay_order.get('fulfillmentStartInstructions', [])
+    ship_to = {}
+    if instructions:
+        ship_to = instructions[0].get('shippingStep', {}).get('shipTo', {})
+
+    contact_addr = ship_to.get('contactAddress', {})
+    buyer = ebay_order.get('buyer', {})
+
+    with transaction.atomic():
+        customer = _find_or_create_ebay_customer(ship_to, buyer, user)
+
+        # Pricing
+        pricing = ebay_order.get('pricingSummary', {})
+        subtotal_val = pricing.get('priceSubtotal', {}).get('value', '0')
+        shipping_val = pricing.get('deliveryCost', {}).get('value', '0')
+        total_val = pricing.get('total', {}).get('value', '0')
+        currency = pricing.get('total', {}).get('currency', 'GBP')
+
+        subtotal = _safe_decimal(subtotal_val)
+        shipping_cost = _safe_decimal(shipping_val)
+        total_value = _safe_decimal(total_val)
+
+        # Payment status
+        payments = ebay_order.get('paymentSummary', {}).get('payments', [])
+        is_paid = any(p.get('paymentStatus') == 'PAID' for p in payments)
+        payment_status = (
+            SalesOrder.PAYMENT_STATUS_PAID if is_paid else SalesOrder.PAYMENT_STATUS_UNPAID
+        )
+
+        full_name = ship_to.get('fullName', buyer.get('username', 'eBay Buyer'))
+        addr1 = contact_addr.get('addressLine1', '')
+        addr2 = contact_addr.get('addressLine2', '')
+        city = contact_addr.get('city', '')
+        state = contact_addr.get('stateOrProvince', '')
+        postcode = contact_addr.get('postalCode', '')
+        country = contact_addr.get('countryCode', 'GB')
+        phone = ship_to.get('primaryPhone', {}).get('phoneNumber', '')
+        email = (
+            ship_to.get('email')
+            or buyer.get('buyerRegistrationAddress', {}).get('email', '')
+        )
+
+        so = SalesOrder.objects.create(
+            channel='ebay',
+            external_order_id=order_id,
+            marketplace_order_id=legacy_order_id,
+            customer=customer,
+            status=SalesOrder.STATUS_CONFIRMED,
+            payment_status=payment_status,
+            ship_to_name=full_name,
+            ship_to_company='',
+            ship_to_address1=addr1,
+            ship_to_address2=addr2,
+            ship_to_city=city,
+            ship_to_postcode=postcode,
+            ship_to_country=country,
+            ship_to_phone=phone,
+            ship_to_email=email or '',
+            bill_to_name=full_name,
+            bill_to_company='',
+            bill_to_address1=addr1,
+            bill_to_city=city,
+            bill_to_postcode=postcode,
+            bill_to_country=country,
+            subtotal=subtotal,
+            shipping_cost=shipping_cost,
+            total_value=total_value,
+            currency=currency,
+            notes=f'eBay Order: {order_id}\nBuyer: {buyer.get("username", "")}',
+            created_by=user,
+        )
+
+        # Line items
+        for li in ebay_order.get('lineItems', []):
+            sku = (li.get('sku') or '').strip()
+            legacy_item_id = li.get('legacyItemId', '')
+            legacy_var_id = li.get('legacyVariationId') or ''
+            line_item_id = li.get('lineItemId', '')
+            title = (li.get('title') or '').strip()
+            qty = max(1, int(li.get('quantity') or 1))
+            unit_price = _safe_decimal(li.get('lineItemCost', {}).get('value', '0'))
+
+            product = _match_product(sku, 'ebay') if sku else None
+
+            if product and legacy_item_id:
+                _ensure_channel_listing(
+                    product=product,
+                    channel_type='ebay',
+                    wc_product_id=legacy_item_id,
+                    wc_sku=sku,
+                    wc_variation_id=legacy_var_id if legacy_var_id else None,
+                )
+
+            fallback_sku = (
+                sku
+                or (f'EBAY-VAR-{legacy_var_id}' if legacy_var_id else f'EBAY-{legacy_item_id}')
+                or f'EBAY-LINE-{line_item_id}'
+            )
+
+            SalesOrderItem.objects.create(
+                order=so,
+                product=product,
+                sku=sku or (product.sku if product else fallback_sku),
+                title=title,
+                quantity=qty,
+                unit_price=unit_price,
+                vat_rate=Decimal('20.00'),
+                buy_price_at_time=product.buy_price if product else Decimal('0.00'),
+            )
+
+        MarketplaceOrder.objects.update_or_create(
+            channel=channel,
+            external_order_id=order_id,
+            defaults={
+                'external_order_number': legacy_order_id,
+                'raw_data': ebay_order,
+                'status': MarketplaceOrder.STATUS_IMPORTED,
+                'sales_order': so,
+                'imported_at': timezone.now(),
+                'error_message': '',
+            },
+        )
+
+    return 'created'
+
+
+def import_ebay_orders(channel, user) -> dict:
+    """
+    Pull eBay orders from the Fulfillment API and import them into ERP.
+    Paginates automatically.
+    Returns: {created, duplicate, failed, processed}
+    """
+    from .integrations.ebay import EbayError
+    from .models import MarketplaceOrder
+
+    client = _get_ebay_client(channel)
+
+    after = None
+    if channel.last_synced:
+        after = (channel.last_synced - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    stats = {'created': 0, 'duplicate': 0, 'failed': 0, 'processed': 0}
+    limit = 50
+    offset = 0
+
+    while True:
+        try:
+            resp = client.get_orders(after=after, limit=limit, offset=offset)
+        except EbayError as exc:
+            if offset == 0:
+                raise
+            logger.warning('eBay order fetch stopped at offset %d: %s', offset, exc)
+            break
+
+        orders = resp.get('orders') or []
+        total = int(resp.get('total', 0))
+
+        for ebay_order in orders:
+            stats['processed'] += 1
+            order_id = ebay_order.get('orderId', '')
+            try:
+                result = _import_single_ebay_order(channel, ebay_order, user)
+                stats[result] = stats.get(result, 0) + 1
+            except Exception as exc:
+                logger.error('Failed to import eBay order %s: %s', order_id, exc, exc_info=True)
+                stats['failed'] += 1
+                try:
+                    MarketplaceOrder.objects.update_or_create(
+                        channel=channel,
+                        external_order_id=order_id,
+                        defaults={
+                            'external_order_number': ebay_order.get('legacyOrderId', order_id),
+                            'raw_data': ebay_order,
+                            'status': MarketplaceOrder.STATUS_FAILED,
+                            'error_message': str(exc)[:500],
+                        },
+                    )
+                except Exception:
+                    pass
+
+        offset += len(orders)
+        if offset >= total or not orders:
+            break
+
+    return stats
+
+
+def push_stock_to_ebay(channel) -> dict:
+    """
+    Push qty_available to eBay for all CONFIRMED (is_active=True) ChannelListings.
+
+    Uses the Inventory API (PUT /inventory_item/{sku}).  The ChannelListing must
+    have external_sku set to the eBay inventory SKU.  Listings with no external_sku
+    are counted as skipped.
+
+    Returns: {success, failed, skipped, not_confirmed}
+    """
+    from django.db.models import Sum
+    from products.models import ChannelListing, StockLevel
+    from .integrations.ebay import EbayError
+
+    client = _get_ebay_client(channel)
+
+    confirmed = (
+        ChannelListing.objects
+        .filter(channel='ebay', is_active=True)
+        .exclude(external_sku='')
+        .select_related('product')
+    )
+    not_confirmed_count = (
+        ChannelListing.objects
+        .filter(channel='ebay', is_active=False)
+        .count()
+    )
+    stats = {
+        'success': 0, 'failed': 0, 'skipped': 0,
+        'not_confirmed': not_confirmed_count,
+    }
+
+    for listing in confirmed:
+        agg = StockLevel.objects.filter(product=listing.product).aggregate(
+            on_hand=Sum('qty_on_hand'),
+            reserved=Sum('qty_reserved'),
+        )
+        available = max(0, int(agg['on_hand'] or 0) - int(agg['reserved'] or 0))
+        try:
+            client.update_inventory_quantity(listing.external_sku, available)
+            listing.last_synced = timezone.now()
+            listing.save(update_fields=['last_synced'])
+            stats['success'] += 1
+            logger.debug(
+                'eBay stock OK: %s → sku=%s qty=%d',
+                listing.product.sku, listing.external_sku, available,
+            )
+        except EbayError as exc:
+            logger.error('eBay stock push FAILED: %s: %s', listing.product.sku, exc)
+            stats['failed'] += 1
+
+    # Count listings with no external_sku (item IDs only, can't use Inventory API)
+    id_only = ChannelListing.objects.filter(
+        channel='ebay', is_active=True, external_sku=''
+    ).count()
+    stats['skipped'] += id_only
+
+    return stats
+
+
+def push_tracking_to_ebay(
+    channel,
+    sales_order,
+    tracking_number: str = None,
+    courier_override: str = None,
+) -> dict:
+    """
+    Mark an eBay order as shipped by creating a shipping fulfillment record.
+
+    If tracking_number / courier_override are not supplied, reads from the most
+    recent Shipment attached to the SalesOrder.
+
+    Returns: {success: bool, tracking: str, order_id: str, error: str}
+    """
+    from .models import MarketplaceOrder
+    from shipping.models import Shipment
+    from .integrations.ebay import EbayError, normalise_carrier
+
+    mp_order = MarketplaceOrder.objects.filter(
+        channel=channel, sales_order=sales_order
+    ).first()
+    if not mp_order:
+        return {
+            'success': False,
+            'error': 'This order was not imported from this eBay channel.',
+        }
+
+    shipment = (
+        sales_order.shipments
+        .filter(tracking_number__gt='')
+        .order_by('-created_at')
+        .first()
+    )
+
+    resolved_tracking = tracking_number or (shipment.tracking_number if shipment else '')
+    resolved_courier = courier_override or (
+        dict(Shipment.COURIER_CHOICES).get(shipment.courier, shipment.courier)
+        if shipment else ''
+    )
+
+    if not resolved_tracking:
+        return {
+            'success': False,
+            'error': (
+                'No tracking number available. Dispatch the order with a tracking number first, '
+                'or enter one in the override field.'
+            ),
+        }
+
+    carrier_code = normalise_carrier(resolved_courier)
+    ebay_order_id = mp_order.external_order_id
+
+    # Build line-item list from the raw eBay order stored in MarketplaceOrder.raw_data
+    raw = mp_order.raw_data or {}
+    line_items = [
+        {'lineItemId': str(li['lineItemId']), 'quantity': int(li.get('quantity', 1))}
+        for li in raw.get('lineItems', [])
+        if li.get('lineItemId')
+    ]
+    if not line_items:
+        return {
+            'success': False,
+            'error': 'No line items found in stored eBay order data. Cannot create shipping fulfillment.',
+        }
+
+    try:
+        client = _get_ebay_client(channel)
+        client.ship_order(
+            order_id=ebay_order_id,
+            tracking_number=resolved_tracking,
+            carrier_code=carrier_code,
+            line_items=line_items,
+        )
+        logger.info(
+            'eBay tracking pushed: order=%s tracking=%s carrier=%s',
+            ebay_order_id, resolved_tracking, carrier_code,
+        )
+        return {
+            'success': True,
+            'tracking': resolved_tracking,
+            'carrier': carrier_code,
+            'order_id': ebay_order_id,
+        }
+    except (EbayError, ValueError) as exc:
+        logger.error('eBay tracking push FAILED for %s: %s', ebay_order_id, exc)
+        return {'success': False, 'error': str(exc)}

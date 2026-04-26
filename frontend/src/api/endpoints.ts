@@ -154,6 +154,9 @@ export const channels = {
   deleteSkuMapping: (id: number, listingId: number) =>
     api.delete(`/channels/${id}/sku-mapping/`, { data: { listing_id: listingId } }),
   unmatchedOrders: (id: number) => api.get(`/channels/${id}/unmatched-orders/`),
+  ebayAuthUrl: (id: number) => api.get(`/channels/${id}/ebay-auth-url/`),
+  ebayExchangeCode: (id: number, data: { code: string }) =>
+    api.post(`/channels/${id}/ebay-exchange-code/`, data),
 }
 
 export const users = {

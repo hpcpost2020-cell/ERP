@@ -111,10 +111,97 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 channel.save(update_fields=['status'])
                 return Response({'ok': False, 'message': str(exc)}, status=400)
 
+        if channel.channel_type == Channel.TYPE_EBAY:
+            from .integrations.ebay import EbayClient, EbayError
+            try:
+                client = EbayClient.from_channel(channel)
+                result = client.test_connection()
+                channel.status = Channel.STATUS_ACTIVE
+                channel.save(update_fields=['status'])
+                return Response(result)
+            except EbayError as exc:
+                channel.status = Channel.STATUS_ERROR
+                channel.save(update_fields=['status'])
+                return Response({'ok': False, 'message': str(exc)}, status=400)
+            except ValueError as exc:
+                return Response({'ok': False, 'message': str(exc)}, status=400)
+
         return Response(
             {'ok': False, 'message': f'Test not yet supported for "{channel.channel_type}".'},
             status=400,
         )
+
+    # ── eBay OAuth ────────────────────────────────────────────────────────────
+
+    @action(detail=True, methods=['get'], url_path='ebay-auth-url')
+    def ebay_auth_url(self, request, pk=None):
+        """
+        Generate the eBay OAuth consent URL.
+        The user visits this URL, grants access, and eBay redirects to their
+        configured RuName URL with ?code=.... They copy the code and use the
+        ebay-exchange-code endpoint to complete setup.
+        """
+        channel = self.get_object()
+        creds = channel.api_credentials or {}
+        app_id = (creds.get('app_id') or '').strip()
+        ru_name = (creds.get('ru_name') or '').strip()
+        sandbox = bool(creds.get('sandbox', False))
+
+        if not app_id or not ru_name:
+            return Response(
+                {'error': 'Save App ID and RuName first before generating an auth URL.'},
+                status=400,
+            )
+
+        from .integrations.ebay import EbayClient
+        auth_url = EbayClient.build_auth_url(app_id=app_id, ru_name=ru_name, sandbox=sandbox)
+        return Response({'auth_url': auth_url})
+
+    @action(detail=True, methods=['post'], url_path='ebay-exchange-code')
+    def ebay_exchange_code(self, request, pk=None):
+        """
+        Exchange an eBay OAuth authorization code for access + refresh tokens.
+        Saves the tokens to channel.api_credentials.
+        Body: {code: "v^1.1#i^1#..."}
+        """
+        channel = self.get_object()
+        code = (request.data.get('code') or '').strip()
+        if not code:
+            return Response({'error': 'Provide the authorization code from eBay.'}, status=400)
+
+        creds = channel.api_credentials or {}
+        app_id = (creds.get('app_id') or '').strip()
+        cert_id = (creds.get('cert_id') or '').strip()
+        ru_name = (creds.get('ru_name') or '').strip()
+        sandbox = bool(creds.get('sandbox', False))
+
+        if not app_id or not cert_id or not ru_name:
+            return Response(
+                {'error': 'Save App ID, Cert ID, and RuName first.'},
+                status=400,
+            )
+
+        from .integrations.ebay import EbayClient, EbayError
+        try:
+            token_data = EbayClient.exchange_code(
+                app_id=app_id,
+                cert_id=cert_id,
+                ru_name=ru_name,
+                code=code,
+                sandbox=sandbox,
+            )
+            creds.update(token_data)
+            channel.api_credentials = creds
+            channel.status = Channel.STATUS_ACTIVE
+            channel.save(update_fields=['api_credentials', 'status'])
+            return Response({
+                'ok': True,
+                'message': 'eBay account connected successfully. Tokens saved.',
+                'token_expires_at': token_data.get('token_expires_at'),
+                'has_refresh_token': bool(token_data.get('refresh_token')),
+            })
+        except EbayError as exc:
+            return Response({'error': str(exc)}, status=400)
 
     # ── Full sync ─────────────────────────────────────────────────────────────
 
@@ -124,9 +211,14 @@ class ChannelViewSet(viewsets.ModelViewSet):
         channel = self.get_object()
         log = _make_log(channel, 'full')
         try:
-            from .sync import import_woocommerce_orders, push_stock_to_woocommerce
-            ostats = import_woocommerce_orders(channel, user=request.user)
-            sstats = push_stock_to_woocommerce(channel)
+            if channel.channel_type == Channel.TYPE_EBAY:
+                from .sync import import_ebay_orders, push_stock_to_ebay
+                ostats = import_ebay_orders(channel, user=request.user)
+                sstats = push_stock_to_ebay(channel)
+            else:
+                from .sync import import_woocommerce_orders, push_stock_to_woocommerce
+                ostats = import_woocommerce_orders(channel, user=request.user)
+                sstats = push_stock_to_woocommerce(channel)
             msg = (
                 f"Orders: {ostats['created']} imported, {ostats.get('duplicate', 0)} dup, "
                 f"{ostats['failed']} failed. "
@@ -163,8 +255,12 @@ class ChannelViewSet(viewsets.ModelViewSet):
         channel = self.get_object()
         log = _make_log(channel, 'import_orders')
         try:
-            from .sync import import_woocommerce_orders
-            stats = import_woocommerce_orders(channel, user=request.user)
+            if channel.channel_type == Channel.TYPE_EBAY:
+                from .sync import import_ebay_orders
+                stats = import_ebay_orders(channel, user=request.user)
+            else:
+                from .sync import import_woocommerce_orders
+                stats = import_woocommerce_orders(channel, user=request.user)
             msg = (
                 f"Imported {stats['created']} new orders, "
                 f"{stats.get('duplicate', 0)} duplicates skipped, "
@@ -196,8 +292,12 @@ class ChannelViewSet(viewsets.ModelViewSet):
         channel = self.get_object()
         log = _make_log(channel, 'push_stock')
         try:
-            from .sync import push_stock_to_woocommerce
-            stats = push_stock_to_woocommerce(channel)
+            if channel.channel_type == Channel.TYPE_EBAY:
+                from .sync import push_stock_to_ebay
+                stats = push_stock_to_ebay(channel)
+            else:
+                from .sync import push_stock_to_woocommerce
+                stats = push_stock_to_woocommerce(channel)
             parts = [f"{stats['success']} updated"]
             if stats['failed']:
                 parts.append(f"{stats['failed']} failed")
@@ -257,23 +357,41 @@ class ChannelViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Order not found'}, status=404)
 
         log = _make_log(channel, 'push_tracking')
-        result = push_tracking_to_woocommerce(
-            channel, so,
-            tracking_number=request.data.get('tracking_number') or None,
-            courier_override=request.data.get('courier') or None,
-            tracking_url_override=request.data.get('tracking_url') or None,
-        )
 
-        if result['success']:
-            _complete_log(
-                log,
-                records_updated=1,
-                message=(
-                    f"Pushed tracking {result['tracking']} "
-                    f"({result.get('courier', '')}) to WC#{result.get('wc_order_id')}."
-                ),
+        if channel.channel_type == Channel.TYPE_EBAY:
+            from .sync import push_tracking_to_ebay
+            result = push_tracking_to_ebay(
+                channel, so,
+                tracking_number=request.data.get('tracking_number') or None,
+                courier_override=request.data.get('courier') or None,
             )
-            return Response({'ok': True, 'message': log.message})
+            if result['success']:
+                _complete_log(
+                    log,
+                    records_updated=1,
+                    message=(
+                        f"eBay: Pushed tracking {result['tracking']} "
+                        f"(carrier: {result.get('carrier', 'OTHER')}) to order {result.get('order_id')}."
+                    ),
+                )
+                return Response({'ok': True, 'message': log.message})
+        else:
+            result = push_tracking_to_woocommerce(
+                channel, so,
+                tracking_number=request.data.get('tracking_number') or None,
+                courier_override=request.data.get('courier') or None,
+                tracking_url_override=request.data.get('tracking_url') or None,
+            )
+            if result['success']:
+                _complete_log(
+                    log,
+                    records_updated=1,
+                    message=(
+                        f"Pushed tracking {result['tracking']} "
+                        f"({result.get('courier', '')}) to WC#{result.get('wc_order_id')}."
+                    ),
+                )
+                return Response({'ok': True, 'message': log.message})
 
         _fail_log(log, result['error'])
         return Response({'ok': False, 'error': result['error']}, status=400)
@@ -303,22 +421,32 @@ class ChannelViewSet(viewsets.ModelViewSet):
         # POST — create / confirm a mapping
         data = request.data
         product_id = data.get('product')
+        erp_sku = (data.get('sku') or '').strip()  # ERP product SKU (alternative to product ID)
         external_id = (data.get('external_id') or '').strip()
         external_sku = (data.get('external_sku') or '').strip()
         parent_id = (data.get('parent_id') or '').strip()
 
-        if not product_id:
-            return Response({'error': 'product (ERP product ID) is required'}, status=400)
+        if not product_id and not erp_sku:
+            return Response(
+                {'error': 'Provide product (ERP product ID) or sku (ERP product SKU)'},
+                status=400,
+            )
         if not external_id and not external_sku:
             return Response(
-                {'error': 'Provide at least external_id (WC product/variation ID) or external_sku'},
+                {'error': 'Provide at least external_id or external_sku'},
                 status=400,
             )
 
         try:
-            product = Product.objects.get(pk=product_id)
+            if product_id:
+                product = Product.objects.get(pk=product_id)
+            else:
+                product = Product.objects.get(sku__iexact=erp_sku)
         except Product.DoesNotExist:
-            return Response({'error': 'Product not found'}, status=404)
+            return Response(
+                {'error': f'Product not found (sku={erp_sku!r})' if erp_sku else 'Product not found'},
+                status=404,
+            )
 
         listing, created = ChannelListing.objects.update_or_create(
             product=product,
