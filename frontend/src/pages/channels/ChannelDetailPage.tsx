@@ -119,6 +119,44 @@ function ImportStatusPill({ status }: { status: string }) {
   )
 }
 
+function LogRow({ log }: { log: SyncLog }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasError = log.status === 'failed' || log.records_failed > 0
+  return (
+    <>
+      <tr
+        className={`hover:bg-gray-50 cursor-pointer ${hasError ? 'bg-red-50/30' : ''}`}
+        onClick={() => log.message && setExpanded(e => !e)}
+      >
+        <td className="px-4 py-2.5 font-medium text-gray-700 whitespace-nowrap">
+          {SYNC_TYPE_LABELS[log.sync_type] || log.sync_type}
+        </td>
+        <td className="px-4 py-2.5"><StatusPill status={log.status} /></td>
+        <td className="px-4 py-2.5 text-right text-gray-600">{log.records_created || 0}</td>
+        <td className="px-4 py-2.5 text-right text-gray-600">{log.records_updated || 0}</td>
+        <td className="px-4 py-2.5 text-right">
+          <span className={log.records_failed > 0 ? 'text-red-600 font-semibold' : 'text-gray-400'}>
+            {log.records_failed || 0}
+          </span>
+        </td>
+        <td className="px-4 py-2.5 text-xs text-gray-400">
+          {log.duration_seconds != null ? `${log.duration_seconds}s` : '—'}
+        </td>
+        <td className="px-4 py-2.5 text-xs text-gray-400 whitespace-nowrap">{timeAgo(log.started_at)}</td>
+      </tr>
+      {expanded && log.message && (
+        <tr className={hasError ? 'bg-red-50' : 'bg-gray-50'}>
+          <td colSpan={7} className="px-4 py-3">
+            <pre className={`text-xs whitespace-pre-wrap font-mono ${hasError ? 'text-red-700' : 'text-gray-600'}`}>
+              {log.message}
+            </pre>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 function timeAgo(iso: string | null): string {
   if (!iso) return '—'
   const diff = Date.now() - new Date(iso).getTime()
@@ -147,6 +185,9 @@ export default function ChannelDetailPage() {
 
   // Push tracking form
   const [trackingOrderId, setTrackingOrderId] = useState('')
+  const [trackingNumber, setTrackingNumber] = useState('')
+  const [trackingCourier, setTrackingCourier] = useState('')
+  const [trackingUrl, setTrackingUrl] = useState('')
   const [trackingResult, setTrackingResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   // SKU Mapping form
@@ -266,10 +307,13 @@ export default function ChannelDetailPage() {
 
   // Push tracking
   const pushTrackingMut = useMutation({
-    mutationFn: (orderId: number) => channelsApi.pushTracking(channelId, { order_id: orderId }).then(r => r.data),
+    mutationFn: (payload: Record<string, string>) => channelsApi.pushTracking(channelId, payload).then(r => r.data),
     onSuccess: (data) => {
       setTrackingResult({ ok: true, message: data.message })
       setTrackingOrderId('')
+      setTrackingNumber('')
+      setTrackingCourier('')
+      setTrackingUrl('')
       refetchLogs()
     },
     onError: (err: unknown) => {
@@ -682,10 +726,129 @@ export default function ChannelDetailPage() {
           </div>
         )}
         {tab === 'logs' && (
-          <div className="p-8 text-center text-sm text-gray-400">Sync Logs tab — coming in Step 5</div>
+          <div className="divide-y divide-gray-100">
+            <div className="px-5 py-3 bg-gray-50 flex items-center justify-between">
+              <p className="text-sm text-gray-600"><strong>{logs.length}</strong> log entries</p>
+              <button onClick={() => refetchLogs()} className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1">
+                <RefreshCw className="w-3 h-3" /> Refresh
+              </button>
+            </div>
+            {logs.length === 0 ? (
+              <div className="p-8 text-center text-sm text-gray-400">No sync history yet. Run Import Orders or Push Stock to create entries.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+                      <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Created</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Updated</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Failed</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Duration</th>
+                      <th className="px-4 py-2.5 text-left font-medium">Started</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(log => (
+                      <LogRow key={log.id} log={log} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         )}
         {tab === 'tracking' && (
-          <div className="p-8 text-center text-sm text-gray-400">Push Tracking tab — coming in Step 5</div>
+          <div className="p-5 space-y-5">
+            <p className="text-sm text-gray-500">
+              Push a tracking number and courier to WooCommerce for a specific order.
+              The order must have been imported from this channel and be dispatched in ERP.
+              This adds a customer-visible note and marks the WooCommerce order as completed.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+                  Order Reference <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                  placeholder="ERP Sales Order ID, Order Number, or WC Order ID"
+                  value={trackingOrderId}
+                  onChange={e => setTrackingOrderId(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">Accepts ERP order ID (e.g. 42), order number (e.g. SO-0042), or WooCommerce order ID.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+                    Tracking Number <span className="text-gray-400">(optional override)</span>
+                  </label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                    placeholder="Leave blank to use shipment tracking"
+                    value={trackingNumber}
+                    onChange={e => setTrackingNumber(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+                    Courier Name <span className="text-gray-400">(optional override)</span>
+                  </label>
+                  <input
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. Royal Mail, DHL, FedEx"
+                    value={trackingCourier}
+                    onChange={e => setTrackingCourier(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
+                  Tracking URL <span className="text-gray-400">(optional override)</span>
+                </label>
+                <input
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                  placeholder="https://track.example.com/ABC123 — leave blank to auto-generate"
+                  value={trackingUrl}
+                  onChange={e => setTrackingUrl(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {trackingResult && (
+              <div className={`flex items-start gap-2 text-sm rounded-lg px-4 py-3 ${trackingResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+                {trackingResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                <span>{trackingResult.message}</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setTrackingResult(null)
+                const payload: Record<string, string> = {}
+                const ref = trackingOrderId.trim()
+                if (!ref) return
+                if (/^\d+$/.test(ref)) {
+                  payload.order_id = ref
+                } else {
+                  payload.order_number = ref
+                }
+                if (trackingNumber.trim()) payload.tracking_number = trackingNumber.trim()
+                if (trackingCourier.trim()) payload.courier = trackingCourier.trim()
+                if (trackingUrl.trim()) payload.tracking_url = trackingUrl.trim()
+                pushTrackingMut.mutate(payload)
+              }}
+              disabled={!trackingOrderId.trim() || pushTrackingMut.isPending || !cs.is_configured}
+              className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+            >
+              {pushTrackingMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+              {pushTrackingMut.isPending ? 'Pushing…' : 'Push Tracking to WooCommerce'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -839,7 +1002,7 @@ export default function ChannelDetailPage() {
             <button
               onClick={() => {
                 setTrackingResult(null)
-                pushTrackingMut.mutate(Number(trackingOrderId))
+                pushTrackingMut.mutate({ order_id: trackingOrderId })
               }}
               disabled={!trackingOrderId || pushTrackingMut.isPending || !cs.is_configured}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
