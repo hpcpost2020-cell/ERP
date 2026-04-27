@@ -887,6 +887,432 @@ def push_stock_to_ebay(channel, dry_run: bool = False) -> dict:
     return stats
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Amazon SP-API sync
+# ChannelListing storage for Amazon:
+#   external_id  = AmazonOrderId (for order import correlation)
+#   external_sku = Seller SKU (for stock push via Listings Items API)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_amazon_client(channel):
+    """Build AmazonClient from channel.api_credentials. Raises ValueError on bad config."""
+    from .integrations.amazon import AmazonClient, AmazonError
+    try:
+        return AmazonClient.from_channel(channel)
+    except AmazonError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _find_or_create_amazon_customer(order: dict, user):
+    """Find customer by email or create a new marketplace customer from Amazon order data."""
+    from customers.models import Customer
+    import random as _random
+
+    addr = order.get('ShippingAddress', {})
+    buyer_info = order.get('BuyerInfo', {})
+    email = (buyer_info.get('BuyerEmail') or '').strip().lower()
+
+    if email:
+        customer = Customer.objects.filter(email__iexact=email).first()
+        if customer:
+            return customer
+
+    full_name = (addr.get('Name') or buyer_info.get('BuyerName') or 'Amazon Buyer').strip()
+    name_parts = full_name.split(' ', 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+    ts = timezone.now().strftime('%y%m%d%H%M%S')
+    cust_num = f'AMZ{ts}'
+    attempts = 0
+    while Customer.objects.filter(customer_number=cust_num).exists():
+        cust_num = f'AMZ{ts}{_random.randint(0, 999):03d}'
+        attempts += 1
+        if attempts > 50:
+            raise RuntimeError('Could not generate unique Amazon customer number')
+
+    return Customer.objects.create(
+        customer_number=cust_num,
+        first_name=first_name,
+        last_name=last_name,
+        email=email or f'noemail+{cust_num.lower()}@import.local',
+        phone=(addr.get('Phone') or '').strip(),
+        customer_type=Customer.TYPE_MARKETPLACE,
+        source='amazon',
+        created_by=user,
+    )
+
+
+def _import_single_amazon_order(channel, order: dict, client, user) -> str:
+    """
+    Import a single Amazon order.
+    Returns 'created' | 'duplicate' or raises on error.
+    """
+    from .models import MarketplaceOrder
+    from sales.models import SalesOrder, SalesOrderItem
+
+    amazon_order_id = order['AmazonOrderId']
+
+    existing = MarketplaceOrder.objects.filter(
+        channel=channel, external_order_id=amazon_order_id
+    ).first()
+    if existing:
+        if (
+            existing.status == MarketplaceOrder.STATUS_IMPORTED
+            and existing.sales_order_id
+            and SalesOrder.objects.filter(pk=existing.sales_order_id).exists()
+        ):
+            return 'duplicate'
+        elif existing.status == MarketplaceOrder.STATUS_IMPORTED:
+            return 'duplicate'
+
+    # Fetch line items from SP-API
+    items = client.get_order_items(amazon_order_id)
+
+    addr = order.get('ShippingAddress', {})
+
+    with transaction.atomic():
+        customer = _find_or_create_amazon_customer(order, user)
+
+        order_total = _safe_decimal(
+            (order.get('OrderTotal') or {}).get('Amount', '0')
+        )
+        currency = (order.get('OrderTotal') or {}).get('CurrencyCode', 'GBP')
+
+        subtotal = sum(
+            _safe_decimal((item.get('ItemPrice') or {}).get('Amount', '0'))
+            for item in items
+        )
+        shipping_cost = sum(
+            _safe_decimal((item.get('ShippingPrice') or {}).get('Amount', '0'))
+            for item in items
+        )
+
+        payment_status = (
+            SalesOrder.PAYMENT_STATUS_PAID
+            if order.get('PaymentStatus') in ('PaymentComplete',)
+            or order.get('OrderStatus') in ('Unshipped', 'PartiallyShipped', 'Shipped')
+            else SalesOrder.PAYMENT_STATUS_UNPAID
+        )
+
+        full_name = (addr.get('Name') or customer.first_name + ' ' + customer.last_name).strip()
+        addr1 = (addr.get('AddressLine1') or '').strip()
+        addr2 = ' '.join(filter(None, [
+            (addr.get('AddressLine2') or '').strip(),
+            (addr.get('AddressLine3') or '').strip(),
+        ]))
+        city = (addr.get('City') or '').strip()
+        postcode = (addr.get('PostalCode') or '').strip()
+        country = (addr.get('CountryCode') or 'GB').strip()
+        phone = (addr.get('Phone') or '').strip()
+
+        so = SalesOrder.objects.create(
+            channel='amazon',
+            external_order_id=amazon_order_id,
+            marketplace_order_id=amazon_order_id,
+            customer=customer,
+            status=SalesOrder.STATUS_CONFIRMED,
+            payment_status=payment_status,
+            ship_to_name=full_name,
+            ship_to_company='',
+            ship_to_address1=addr1,
+            ship_to_address2=addr2,
+            ship_to_city=city,
+            ship_to_postcode=postcode,
+            ship_to_country=country,
+            ship_to_phone=phone,
+            ship_to_email=customer.email,
+            bill_to_name=full_name,
+            bill_to_company='',
+            bill_to_address1=addr1,
+            bill_to_city=city,
+            bill_to_postcode=postcode,
+            bill_to_country=country,
+            subtotal=subtotal,
+            shipping_cost=shipping_cost,
+            total_value=order_total or (subtotal + shipping_cost),
+            currency=currency,
+            notes=f'Amazon Order: {amazon_order_id}',
+            created_by=user,
+        )
+
+        for item in items:
+            seller_sku = (item.get('SellerSKU') or '').strip()
+            asin = (item.get('ASIN') or '').strip()
+            title = (item.get('Title') or '').strip()
+            qty = max(1, int(item.get('QuantityOrdered') or 1))
+            order_item_id = item.get('OrderItemId', '')
+
+            item_price = _safe_decimal(
+                (item.get('ItemPrice') or {}).get('Amount', '0')
+            )
+            unit_price = (item_price / qty) if qty else item_price
+
+            product = _match_product(seller_sku, 'amazon') if seller_sku else None
+
+            if product and seller_sku:
+                ChannelListing_mod = None
+                try:
+                    from products.models import ChannelListing
+                    ChannelListing_mod = ChannelListing
+                except ImportError:
+                    pass
+                if ChannelListing_mod:
+                    ChannelListing_mod.objects.get_or_create(
+                        product=product,
+                        channel='amazon',
+                        external_id=asin or seller_sku,
+                        defaults={
+                            'external_sku': seller_sku,
+                            'parent_id': '',
+                            'is_active': False,
+                        },
+                    )
+
+            fallback_sku = seller_sku or (f'AMZN-{asin}' if asin else f'AMZN-{order_item_id}')
+
+            SalesOrderItem.objects.create(
+                order=so,
+                product=product,
+                sku=seller_sku or (product.sku if product else fallback_sku),
+                title=title,
+                quantity=qty,
+                unit_price=unit_price,
+                vat_rate=Decimal('20.00'),
+                buy_price_at_time=product.buy_price if product else Decimal('0.00'),
+            )
+
+        MarketplaceOrder.objects.update_or_create(
+            channel=channel,
+            external_order_id=amazon_order_id,
+            defaults={
+                'external_order_number': amazon_order_id,
+                'raw_data': {**order, '_items': items},
+                'status': MarketplaceOrder.STATUS_IMPORTED,
+                'sales_order': so,
+                'imported_at': timezone.now(),
+                'error_message': '',
+            },
+        )
+
+    return 'created'
+
+
+def import_amazon_orders(channel, user) -> dict:
+    """
+    Pull FBM orders from Amazon SP-API and import them into ERP.
+    Returns: {created, duplicate, failed, processed}
+    """
+    from .integrations.amazon import AmazonError
+    from .models import MarketplaceOrder
+
+    client = _get_amazon_client(channel)
+
+    created_after = None
+    if channel.last_synced:
+        created_after = (channel.last_synced - timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    stats = {'created': 0, 'duplicate': 0, 'failed': 0, 'processed': 0}
+
+    try:
+        orders = client.get_orders(created_after=created_after)
+    except AmazonError as exc:
+        raise ValueError(f"Amazon order fetch failed: {exc}") from exc
+
+    for order in orders:
+        stats['processed'] += 1
+        amazon_order_id = order.get('AmazonOrderId', '')
+        try:
+            result = _import_single_amazon_order(channel, order, client, user)
+            stats[result] = stats.get(result, 0) + 1
+        except Exception as exc:
+            logger.error('Failed to import Amazon order %s: %s', amazon_order_id, exc, exc_info=True)
+            stats['failed'] += 1
+            try:
+                MarketplaceOrder.objects.update_or_create(
+                    channel=channel,
+                    external_order_id=amazon_order_id,
+                    defaults={
+                        'external_order_number': amazon_order_id,
+                        'raw_data': order,
+                        'status': MarketplaceOrder.STATUS_FAILED,
+                        'error_message': str(exc)[:500],
+                    },
+                )
+            except Exception:
+                pass
+
+    return stats
+
+
+def push_stock_to_amazon(channel, dry_run: bool = False) -> dict:
+    """
+    Push qty_available to Amazon for all CONFIRMED (is_active=True) ChannelListings.
+    Uses the Listings Items API (PATCH fulfillment_availability).
+
+    dry_run=True: calculates what would be pushed but makes NO Amazon API calls.
+                  Returns preview list in stats['preview'].
+
+    Returns: {success, failed, skipped, not_confirmed, dry_run, errors, preview}
+    """
+    from django.db.models import Sum
+    from products.models import ChannelListing, StockLevel
+    from .integrations.amazon import AmazonError
+
+    confirmed = (
+        ChannelListing.objects
+        .filter(channel='amazon', is_active=True)
+        .exclude(external_sku='')
+        .select_related('product')
+    )
+    not_confirmed_count = (
+        ChannelListing.objects
+        .filter(channel='amazon', is_active=False)
+        .count()
+    )
+    id_only_count = ChannelListing.objects.filter(
+        channel='amazon', is_active=True, external_sku=''
+    ).count()
+
+    stats = {
+        'success': 0, 'failed': 0, 'skipped': id_only_count,
+        'not_confirmed': not_confirmed_count,
+        'dry_run': dry_run,
+        'errors': [],
+        'preview': [],
+    }
+
+    if dry_run:
+        for listing in confirmed:
+            agg = StockLevel.objects.filter(product=listing.product).aggregate(
+                on_hand=Sum('qty_on_hand'),
+                reserved=Sum('qty_reserved'),
+            )
+            available = max(0, int(agg['on_hand'] or 0) - int(agg['reserved'] or 0))
+            stats['preview'].append({
+                'erp_sku': listing.product.sku,
+                'amazon_sku': listing.external_sku,
+                'qty': available,
+            })
+            stats['success'] += 1
+        return stats
+
+    client = _get_amazon_client(channel)
+
+    for listing in confirmed:
+        agg = StockLevel.objects.filter(product=listing.product).aggregate(
+            on_hand=Sum('qty_on_hand'),
+            reserved=Sum('qty_reserved'),
+        )
+        available = max(0, int(agg['on_hand'] or 0) - int(agg['reserved'] or 0))
+        try:
+            client.update_listing_quantity(listing.external_sku, available)
+            listing.last_synced = timezone.now()
+            listing.save(update_fields=['last_synced'])
+            stats['success'] += 1
+            logger.info(
+                'Amazon stock OK: erp=%s seller_sku=%s qty=%d',
+                listing.product.sku, listing.external_sku, available,
+            )
+        except AmazonError as exc:
+            errmsg = f'HTTP {exc.status_code}: {exc}' if exc.status_code else str(exc)
+            logger.error(
+                'Amazon stock push FAILED: erp=%s seller_sku=%s — %s',
+                listing.product.sku, listing.external_sku, errmsg,
+            )
+            stats['failed'] += 1
+            stats['errors'].append({
+                'erp_sku': listing.product.sku,
+                'amazon_sku': listing.external_sku,
+                'error': errmsg,
+            })
+
+    return stats
+
+
+def push_tracking_to_amazon(
+    channel,
+    sales_order,
+    tracking_number: str = None,
+    courier_override: str = None,
+) -> dict:
+    """
+    Confirm shipment on Amazon via the Orders API (confirm_shipment).
+    Reads tracking from the most recent Shipment if not overridden.
+    Returns: {success: bool, tracking: str, order_id: str, error: str}
+    """
+    from .models import MarketplaceOrder
+    from shipping.models import Shipment
+    from .integrations.amazon import AmazonError, normalise_carrier
+
+    mp_order = MarketplaceOrder.objects.filter(
+        channel=channel, sales_order=sales_order
+    ).first()
+    if not mp_order:
+        return {'success': False, 'error': 'This order was not imported from this Amazon channel.'}
+
+    shipment = (
+        sales_order.shipments
+        .filter(tracking_number__gt='')
+        .order_by('-created_at')
+        .first()
+    )
+
+    resolved_tracking = tracking_number or (shipment.tracking_number if shipment else '')
+    resolved_courier = courier_override or (
+        dict(Shipment.COURIER_CHOICES).get(shipment.courier, shipment.courier)
+        if shipment else ''
+    )
+
+    if not resolved_tracking:
+        return {
+            'success': False,
+            'error': (
+                'No tracking number available. Dispatch the order with a tracking number first, '
+                'or enter one in the override field.'
+            ),
+        }
+
+    carrier_code = normalise_carrier(resolved_courier)
+    amazon_order_id = mp_order.external_order_id
+
+    # Build order items list from raw stored data
+    raw = mp_order.raw_data or {}
+    stored_items = raw.get('_items') or []
+    order_items = [
+        {
+            'order_item_id': item['OrderItemId'],
+            'quantity': int(item.get('QuantityOrdered') or 1),
+        }
+        for item in stored_items
+        if item.get('OrderItemId')
+    ]
+
+    if not order_items:
+        return {
+            'success': False,
+            'error': 'No order items found in stored Amazon order data. Cannot confirm shipment.',
+        }
+
+    try:
+        client = _get_amazon_client(channel)
+        client.confirm_shipment(
+            amazon_order_id=amazon_order_id,
+            tracking_number=resolved_tracking,
+            carrier_code=carrier_code,
+            order_items=order_items,
+        )
+        return {
+            'success': True,
+            'tracking': resolved_tracking,
+            'carrier': carrier_code,
+            'order_id': amazon_order_id,
+        }
+    except (AmazonError, ValueError) as exc:
+        logger.error('Amazon tracking push FAILED for %s: %s', amazon_order_id, exc)
+        return {'success': False, 'error': str(exc)}
+
+
 def push_tracking_to_ebay(
     channel,
     sales_order,

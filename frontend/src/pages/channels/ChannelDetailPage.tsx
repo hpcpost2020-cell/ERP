@@ -24,6 +24,9 @@ interface CredentialsSummary {
   refresh_token_expires_at?: string
   sandbox?: boolean
   marketplace_id?: string
+  // Amazon
+  seller_id_hint?: string
+  lwa_client_id_hint?: string
   // shared
   is_configured?: boolean
 }
@@ -446,6 +449,184 @@ function EbayGuideTab({ cs, channel, onGotoTab }: {
   )
 }
 
+// ── Amazon Live Test Guide ────────────────────────────────────────────────────
+
+function AmazonGuideTab({ cs, channel, onGotoTab }: {
+  cs: CredentialsSummary
+  channel: { status: string; last_synced: string | null }
+  onGotoTab: (t: Tab) => void
+}) {
+  const hasCredentials = !!(cs.seller_id_hint && cs.has_refresh_token)
+  const isConnected = channel.status === 'active' && hasCredentials
+  const hasSynced = !!channel.last_synced
+
+  const steps: GuideStep[] = [
+    {
+      num: 1,
+      title: 'Create an Amazon SP-API application',
+      done: hasCredentials,
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Log in to <strong>Seller Central</strong> at sellercentral.amazon.co.uk</li>
+          <li>Go to <strong>Apps &amp; Services → Develop Apps</strong></li>
+          <li>Click <strong>Add new app client</strong>, give it a name (e.g. "ERP Integration"), select <strong>SP-API</strong></li>
+          <li>Under <strong>API type</strong>, select <strong>Seller</strong> (not Vendor)</li>
+          <li>Note your <strong>LWA Client ID</strong> (starts with <code className="text-xs bg-gray-100 px-1 rounded">amzn1.application-oa2-client.</code>) and <strong>LWA Client Secret</strong></li>
+          <li>Click <strong>Authorise</strong> on your own application to generate a <strong>Refresh Token</strong> — copy it immediately, it is shown once</li>
+          <li>Find your <strong>Seller ID</strong> (Merchant Token) at Seller Central → Account Info</li>
+        </ol>
+      ),
+    },
+    {
+      num: 2,
+      title: 'Enter credentials in ERP',
+      done: hasCredentials,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>Credentials tab</strong> on this page</li>
+          <li>Enter your <strong>Seller ID</strong>, <strong>LWA Client ID</strong>, <strong>LWA Client Secret</strong>, and <strong>Refresh Token</strong></li>
+          <li>Select your <strong>Marketplace</strong> (default: Amazon UK — A1F83G8C2ARO7P)</li>
+          <li>Click <strong>Save Credentials</strong></li>
+        </ol>
+      ),
+    },
+    {
+      num: 3,
+      title: 'Test the connection',
+      done: isConnected,
+      tab: 'credentials',
+      action: 'Credentials tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the Credentials tab, click <strong>Test Connection</strong></li>
+          <li>A green message confirms SP-API access works and shows your marketplace participations</li>
+          <li>If it fails: check Seller ID, ensure the app is authorised in Seller Central, and verify the refresh token was not revoked</li>
+        </ol>
+      ),
+    },
+    {
+      num: 4,
+      title: 'Import FBM orders',
+      done: hasSynced,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Go to the <strong>Overview</strong> tab and click <strong>Import Orders</strong></li>
+          <li>This fetches FBM (Merchant Fulfilled) orders with status <em>Unshipped</em> or <em>PartiallyShipped</em></li>
+          <li>Orders are matched to ERP products by <strong>Seller SKU</strong></li>
+          <li>Check <strong>Sales → Orders</strong> to see imported orders</li>
+          <li>No stock is pushed yet — mappings start inactive and must be confirmed first</li>
+        </ol>
+      ),
+      warning: 'Import is safe to run multiple times — duplicates are detected and skipped.',
+    },
+    {
+      num: 5,
+      title: 'Review unmatched orders',
+      done: false,
+      tab: 'unmatched',
+      action: 'Unmatched Orders →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>Unmatched Orders</strong> tab</li>
+          <li>Orders with line items that could not be matched to an ERP product appear here</li>
+          <li>Use the <strong>SKU Mapping</strong> tab to link the Amazon Seller SKU to an ERP product</li>
+        </ol>
+      ),
+    },
+    {
+      num: 6,
+      title: 'Activate SKU mappings',
+      done: false,
+      tab: 'skus',
+      action: 'SKU Mapping →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Open the <strong>SKU Mapping</strong> tab</li>
+          <li>Auto-created mappings are <em>Inactive</em> — stock will not be pushed until you activate them</li>
+          <li>The <strong>Channel SKU</strong> column must contain the Amazon <strong>Seller SKU</strong> (not ASIN) for stock push to work</li>
+          <li>Verify each row, then click <strong>Inactive</strong> to activate confirmed mappings</li>
+        </ol>
+      ),
+      warning: 'Only activate mappings you have verified. Activating a wrong mapping pushes incorrect stock to Amazon.',
+    },
+    {
+      num: 7,
+      title: 'Dry-run stock push (preview — no changes to Amazon)',
+      done: false,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>In the <strong>Overview</strong> tab, click <strong>Dry Run (preview only)</strong></li>
+          <li>This shows every active mapping and the quantity that <em>would</em> be sent to Amazon</li>
+          <li>No API calls are made to Amazon — completely safe to run any number of times</li>
+          <li>Review the preview table, then proceed to a live push when ready</li>
+        </ol>
+      ),
+    },
+    {
+      num: 8,
+      title: 'Live stock push',
+      done: false,
+      tab: 'overview',
+      action: 'Overview tab →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Activate one or more SKU mappings in the SKU Mapping tab</li>
+          <li>Click <strong>Push Stock</strong> in the Overview tab</li>
+          <li>Check the <strong>Sync Logs</strong> tab — a successful push shows "N updated"</li>
+          <li>Stock is updated on Amazon via the <strong>Listings Items API</strong> (FBM fulfillment availability)</li>
+          <li>Note: Amazon may take a few minutes to reflect the new stock level</li>
+        </ol>
+      ),
+      warning: 'Stock push only works for listings managed via the SP-API. FBA listings are not affected — this integration pushes FBM (Merchant Fulfilled) availability only.',
+    },
+    {
+      num: 9,
+      title: 'Test tracking push on one order',
+      done: false,
+      tab: 'tracking',
+      action: 'Push Tracking →',
+      details: (
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Dispatch a sales order in ERP with a real tracking number (Sales → Orders → Dispatch)</li>
+          <li>Go to the <strong>Push Tracking</strong> tab</li>
+          <li>Enter the ERP Sales Order ID or Order Number</li>
+          <li>Optionally enter a tracking number and courier override (e.g. "Royal Mail")</li>
+          <li>Click <strong>Push Tracking to Amazon</strong></li>
+          <li>Amazon marks the order as shipped via <code className="text-xs bg-gray-100 px-1 rounded">confirm_shipment</code></li>
+          <li>Check <strong>Sync Logs</strong> for the result</li>
+        </ol>
+      ),
+      warning: 'The tracking push marks the Amazon order as shipped permanently. Only do this on a real dispatched order with a genuine tracking number.',
+    },
+  ]
+
+  return (
+    <div className="p-5 space-y-3">
+      <div className="flex items-center gap-3">
+        <div>
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-orange-600" /> Amazon SP-API Live Test Checklist
+          </h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Step-by-step guide to connect, test, and go live with Amazon SP-API. Click any step to expand instructions.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {steps.map(step => (
+          <StepRow key={step.num} step={step} onGotoTab={onGotoTab} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
@@ -471,6 +652,27 @@ export default function ChannelDetailPage() {
   const [ebayCode, setEbayCode] = useState('')
   const [ebayCodeResult, setEbayCodeResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [ebayCredSaved, setEbayCredSaved] = useState(false)
+
+  // Amazon credentials form state
+  const [amzSellerId, setAmzSellerId] = useState('')
+  const [amzClientId, setAmzClientId] = useState('')
+  const [amzClientSecret, setAmzClientSecret] = useState('')
+  const [amzRefreshToken, setAmzRefreshToken] = useState('')
+  const [amzMarketplaceId, setAmzMarketplaceId] = useState('A1F83G8C2ARO7P')
+  const [amzCredSaved, setAmzCredSaved] = useState(false)
+
+  // Amazon: save credentials mutation
+  const amzCredMut = useMutation({
+    mutationFn: (data: Record<string, string>) =>
+      channelsApi.setCredentials(channelId, data).then(r => r.data),
+    onSuccess: () => {
+      setAmzCredSaved(true)
+      setAmzClientSecret('')
+      setAmzRefreshToken('')
+      qc.invalidateQueries({ queryKey: ['channel', channelId] })
+      setTimeout(() => setAmzCredSaved(false), 3000)
+    },
+  })
 
   // Push tracking form
   const [trackingOrderId, setTrackingOrderId] = useState('')
@@ -680,7 +882,7 @@ export default function ChannelDetailPage() {
 
   // eBay dry-run stock push
   const [dryRunResult, setDryRunResult] = useState<{
-    preview: Array<{ erp_sku: string; ebay_sku: string; qty: number }>
+    preview: Array<{ erp_sku: string; ebay_sku?: string; amazon_sku?: string; qty: number }>
     message: string
   } | null>(null)
 
@@ -707,6 +909,7 @@ export default function ChannelDetailPage() {
   const cs = channel.credentials_summary || {}
   const isWC = channel.channel_type === 'woocommerce'
   const isEbay = channel.channel_type === 'ebay'
+  const isAmazon = channel.channel_type === 'amazon'
 
   const tabClass = (t: Tab) =>
     `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
@@ -754,7 +957,7 @@ export default function ChannelDetailPage() {
           <button className={tabClass('tracking')} onClick={() => setTab('tracking')}>
             <Truck className="w-3.5 h-3.5" /> Push Tracking
           </button>
-          {isEbay && (
+          {(isEbay || isAmazon) && (
             <button className={tabClass('guide')} onClick={() => setTab('guide')}>
               <BookOpen className="w-3.5 h-3.5" /> Live Test Guide
             </button>
@@ -972,6 +1175,162 @@ export default function ChannelDetailPage() {
               </>
             )}
 
+            {/* ── Amazon SP-API credentials ─────────────────────────────── */}
+            {isAmazon && (
+              <>
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-orange-800 flex items-center gap-2">
+                    <Tag className="w-4 h-4" /> How to connect your Amazon Seller account
+                  </h3>
+                  <ol className="text-sm text-orange-700 space-y-1.5 list-decimal list-inside">
+                    <li>Go to <strong>Seller Central → Apps &amp; Services → Develop Apps</strong></li>
+                    <li>Create a new application (SP-API, self-authorised)</li>
+                    <li>Under <strong>LWA Credentials</strong>, note your <strong>Client ID</strong> (starts with <code className="text-xs bg-orange-100 px-1 rounded">amzn1.application-oa2-client.</code>) and <strong>Client Secret</strong></li>
+                    <li>Under <strong>Authorise</strong>, generate a <strong>Refresh Token</strong> by clicking "Authorise" and following the flow — copy the token shown at the end</li>
+                    <li>Find your <strong>Seller ID</strong> in Seller Central → Account Info → Merchant Token</li>
+                    <li>Enter all four values below and click <strong>Save Credentials</strong></li>
+                    <li>Click <strong>Test Connection</strong> to verify everything is working</li>
+                  </ol>
+                </div>
+
+                {/* Current status */}
+                <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-gray-700">Current credential status</h3>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-gray-400">Seller ID</span>
+                      <p className="font-mono text-gray-800 mt-0.5">{cs.seller_id_hint || <span className="text-gray-400 font-sans">Not set</span>}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Marketplace</span>
+                      <p className="font-mono text-gray-800 mt-0.5">{cs.marketplace_id || 'A1F83G8C2ARO7P'}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">LWA Client ID</span>
+                      <p className="font-mono text-gray-800 mt-0.5">{cs.lwa_client_id_hint || <span className="text-gray-400 font-sans">Not set</span>}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-400">Refresh Token</span>
+                      <p className="mt-0.5">
+                        {cs.has_refresh_token
+                          ? <span className="text-green-700 font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Stored</span>
+                          : <span className="text-gray-400">Not stored</span>}
+                      </p>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-gray-400">Ready</span>
+                      <p className="mt-0.5">
+                        {cs.is_configured
+                          ? <span className="text-green-700 font-semibold flex items-center gap-1"><Wifi className="w-3.5 h-3.5" /> Configured</span>
+                          : <span className="text-amber-600 flex items-center gap-1"><WifiOff className="w-3.5 h-3.5" /> Incomplete — fill all fields below</span>}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Credentials form */}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold text-gray-700">SP-API Credentials</h3>
+                  <p className="text-xs text-gray-400">Leave a field blank to keep its existing value. Secrets are stored encrypted and never shown again.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Seller ID (Merchant Token)</label>
+                      <input
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={amzSellerId} onChange={e => setAmzSellerId(e.target.value)}
+                        placeholder={cs.seller_id_hint || 'XXXXXXXXXX'}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Marketplace ID</label>
+                      <select
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                        value={amzMarketplaceId} onChange={e => setAmzMarketplaceId(e.target.value)}
+                      >
+                        <option value="A1F83G8C2ARO7P">Amazon UK (A1F83G8C2ARO7P)</option>
+                        <option value="ATVPDKIKX0DER">Amazon US (ATVPDKIKX0DER)</option>
+                        <option value="A1PA6795UKMFR9">Amazon DE (A1PA6795UKMFR9)</option>
+                        <option value="APJ6JRA9NG5V4">Amazon IT (APJ6JRA9NG5V4)</option>
+                        <option value="A13V1IB3VIYZZH">Amazon FR (A13V1IB3VIYZZH)</option>
+                        <option value="A1RKKUPIHCS9HS">Amazon ES (A1RKKUPIHCS9HS)</option>
+                        <option value="A39IBJ37TRP1C6">Amazon AU (A39IBJ37TRP1C6)</option>
+                        <option value="A2EUQ1WTGCTBG2">Amazon CA (A2EUQ1WTGCTBG2)</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">LWA Client ID</label>
+                      <input
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={amzClientId} onChange={e => setAmzClientId(e.target.value)}
+                        placeholder={cs.lwa_client_id_hint || 'amzn1.application-oa2-client.xxx'}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">LWA Client Secret</label>
+                      <input
+                        type="password"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={amzClientSecret} onChange={e => setAmzClientSecret(e.target.value)}
+                        placeholder={cs.is_configured ? '•••••••• (stored — enter to replace)' : 'amzn1.oa2-cs.v1.xxx'}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">Refresh Token</label>
+                      <input
+                        type="password"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                        value={amzRefreshToken} onChange={e => setAmzRefreshToken(e.target.value)}
+                        placeholder={cs.has_refresh_token ? '•••••••• (stored — enter to replace)' : 'Atzr|…'}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                  </div>
+
+                  {amzCredSaved && (
+                    <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" /> Amazon credentials saved.
+                    </p>
+                  )}
+
+                  <div className="flex gap-3 pt-1">
+                    <button
+                      onClick={() => {
+                        const payload: Record<string, string> = { marketplace_id: amzMarketplaceId }
+                        if (amzSellerId.trim()) payload.seller_id = amzSellerId.trim()
+                        if (amzClientId.trim()) payload.lwa_client_id = amzClientId.trim()
+                        if (amzClientSecret.trim()) payload.lwa_client_secret = amzClientSecret.trim()
+                        if (amzRefreshToken.trim()) payload.refresh_token = amzRefreshToken.trim()
+                        amzCredMut.mutate(payload)
+                      }}
+                      disabled={amzCredMut.isPending}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      {amzCredMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      {amzCredMut.isPending ? 'Saving…' : 'Save Credentials'}
+                    </button>
+                    <button
+                      onClick={() => testMut.mutate()}
+                      disabled={testMut.isPending || !cs.is_configured}
+                      className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {testMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                      {testMut.isPending ? 'Testing…' : 'Test Connection'}
+                    </button>
+                  </div>
+
+                  {testResult && (
+                    <div className={`flex items-start gap-2 text-sm rounded-lg px-4 py-3 ${testResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+                      {testResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                      <span>{testResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             {/* ── WooCommerce credentials ──────────────────────────────── */}
             {isWC && (
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
@@ -1097,8 +1456,9 @@ export default function ChannelDetailPage() {
             <div className="p-4 bg-amber-50 text-amber-800 text-sm flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
-                <strong>Stock push safety:</strong> Only mappings marked <strong>Active</strong> will push stock to {isEbay ? 'eBay' : 'WooCommerce'}.
+                <strong>Stock push safety:</strong> Only mappings marked <strong>Active</strong> will push stock to {isEbay ? 'eBay' : isAmazon ? 'Amazon' : 'WooCommerce'}.
                 {isEbay && <> For eBay, the <strong>Channel SKU</strong> column must contain the eBay Inventory API SKU (not the listing ID). Stock push uses the Inventory API.</>}
+                {isAmazon && <> For Amazon, the <strong>Channel SKU</strong> column must contain the <strong>Seller SKU</strong> (not the ASIN). Stock push uses the Listings Items API.</>}
                 Auto-created mappings start as inactive. Review and activate each one after confirming the product match is correct.
               </span>
             </div>
@@ -1321,7 +1681,9 @@ export default function ChannelDetailPage() {
             <p className="text-sm text-gray-500">
               {isEbay
                 ? 'Push a tracking number to eBay to mark an order as shipped. The order must have been imported from this channel and dispatched in ERP. This creates a shipping fulfillment record on eBay.'
-                : 'Push a tracking number and courier to WooCommerce for a specific order. The order must have been imported from this channel and be dispatched in ERP. This adds a customer-visible note and marks the WooCommerce order as completed.'}
+                : isAmazon
+                  ? 'Push a tracking number to Amazon to confirm shipment. The order must have been imported from this channel and dispatched in ERP. This calls confirm_shipment on the Amazon Orders API.'
+                  : 'Push a tracking number and courier to WooCommerce for a specific order. The order must have been imported from this channel and be dispatched in ERP. This adds a customer-visible note and marks the WooCommerce order as completed.'}
             </p>
 
             <div className="space-y-3">
@@ -1376,10 +1738,10 @@ export default function ChannelDetailPage() {
                   />
                 </div>
               )}
-              {isEbay && (
+              {(isEbay || isAmazon) && (
                 <p className="text-xs text-gray-400 col-span-2">
-                  eBay carrier code is auto-detected from the courier name (e.g. "Royal Mail" → ROYALMAIL).
-                  If unrecognised, it defaults to OTHER.
+                  Carrier code is auto-detected from the courier name (e.g. "Royal Mail" → {isEbay ? 'ROYALMAIL' : 'Royal Mail'}).
+                  If unrecognised, it defaults to {isEbay ? 'OTHER' : 'Other'}.
                 </p>
               )}
             </div>
@@ -1411,13 +1773,16 @@ export default function ChannelDetailPage() {
               className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
             >
               {pushTrackingMut.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-              {pushTrackingMut.isPending ? 'Pushing…' : isEbay ? 'Push Tracking to eBay' : 'Push Tracking to WooCommerce'}
+              {pushTrackingMut.isPending ? 'Pushing…' : isEbay ? 'Push Tracking to eBay' : isAmazon ? 'Push Tracking to Amazon' : 'Push Tracking to WooCommerce'}
             </button>
           </div>
         )}
-        {/* eBay Live Test Guide */}
+        {/* Live Test Guide */}
         {tab === 'guide' && isEbay && (
           <EbayGuideTab cs={cs} channel={channel} onGotoTab={setTab} />
+        )}
+        {tab === 'guide' && isAmazon && (
+          <AmazonGuideTab cs={cs} channel={channel} onGotoTab={setTab} />
         )}
       </div>
 
@@ -1548,8 +1913,8 @@ export default function ChannelDetailPage() {
           </button>
         </div>
 
-        {/* eBay dry run */}
-        {isEbay && (
+        {/* Dry run — eBay and Amazon */}
+        {(isEbay || isAmazon) && (
           <div className="space-y-2">
             <button
               onClick={() => { setDryRunResult(null); dryRunMut.mutate() }}
@@ -1570,7 +1935,7 @@ export default function ChannelDetailPage() {
                     <thead>
                       <tr className="text-purple-600 uppercase tracking-wide">
                         <th className="text-left py-1">ERP SKU</th>
-                        <th className="text-left py-1">eBay Inventory SKU</th>
+                        <th className="text-left py-1">{isAmazon ? 'Seller SKU' : 'eBay Inventory SKU'}</th>
                         <th className="text-right py-1">Qty</th>
                       </tr>
                     </thead>
@@ -1578,29 +1943,31 @@ export default function ChannelDetailPage() {
                       {dryRunResult.preview.map((p, i) => (
                         <tr key={i}>
                           <td className="py-1 font-mono">{p.erp_sku}</td>
-                          <td className="py-1 font-mono">{p.ebay_sku}</td>
+                          <td className="py-1 font-mono">{isAmazon ? p.amazon_sku : p.ebay_sku}</td>
                           <td className="py-1 text-right font-semibold">{p.qty}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-                <p className="text-xs text-purple-600 italic">No changes were made to eBay.</p>
+                <p className="text-xs text-purple-600 italic">No changes were made to {isAmazon ? 'Amazon' : 'eBay'}.</p>
               </div>
             )}
           </div>
         )}
 
         <p className="text-xs text-gray-400">
-          <strong>Import Orders</strong> pulls {isEbay ? 'eBay' : 'WooCommerce'} orders with status processing/on-hold/pending.
+          <strong>Import Orders</strong> pulls {isEbay ? 'eBay' : isAmazon ? 'Amazon FBM (Merchant Fulfilled)' : 'WooCommerce'} orders
+          {isAmazon ? ' with status Unshipped or PartiallyShipped' : ' with status processing/on-hold/pending'}.
           <strong className="ml-2">Push Stock</strong> updates qty_available for all <strong>confirmed active</strong> mappings only — inactive mappings are never pushed.
           {isEbay && <><br /><strong className="text-amber-600">Note:</strong> Only listings managed via the eBay Inventory API can be updated. Traditional "Sell Your Item" listings are skipped and logged.</>}
+          {isAmazon && <><br /><strong className="text-amber-600">Note:</strong> Stock push uses the Listings Items API and updates FBM (Merchant Fulfilled) availability. FBA inventory is managed separately by Amazon.</>}
         </p>
 
         {/* Push tracking */}
         <div className="border-t border-gray-100 pt-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-            <Truck className="w-4 h-4" /> {isEbay ? 'Push Tracking to eBay' : 'Push Tracking to WooCommerce'}
+            <Truck className="w-4 h-4" /> {isEbay ? 'Push Tracking to eBay' : isAmazon ? 'Push Tracking to Amazon' : 'Push Tracking to WooCommerce'}
           </h3>
           <div className="flex gap-2">
             <input

@@ -126,6 +126,21 @@ class ChannelViewSet(viewsets.ModelViewSet):
             except ValueError as exc:
                 return Response({'ok': False, 'message': str(exc)}, status=400)
 
+        if channel.channel_type == Channel.TYPE_AMAZON:
+            from .integrations.amazon import AmazonClient, AmazonError
+            try:
+                client = AmazonClient.from_channel(channel)
+                result = client.test_connection()
+                channel.status = Channel.STATUS_ACTIVE
+                channel.save(update_fields=['status'])
+                return Response(result)
+            except AmazonError as exc:
+                channel.status = Channel.STATUS_ERROR
+                channel.save(update_fields=['status'])
+                return Response({'ok': False, 'message': str(exc)}, status=400)
+            except ValueError as exc:
+                return Response({'ok': False, 'message': str(exc)}, status=400)
+
         return Response(
             {'ok': False, 'message': f'Test not yet supported for "{channel.channel_type}".'},
             status=400,
@@ -215,6 +230,10 @@ class ChannelViewSet(viewsets.ModelViewSet):
                 from .sync import import_ebay_orders, push_stock_to_ebay
                 ostats = import_ebay_orders(channel, user=request.user)
                 sstats = push_stock_to_ebay(channel)
+            elif channel.channel_type == Channel.TYPE_AMAZON:
+                from .sync import import_amazon_orders, push_stock_to_amazon
+                ostats = import_amazon_orders(channel, user=request.user)
+                sstats = push_stock_to_amazon(channel)
             else:
                 from .sync import import_woocommerce_orders, push_stock_to_woocommerce
                 ostats = import_woocommerce_orders(channel, user=request.user)
@@ -258,6 +277,9 @@ class ChannelViewSet(viewsets.ModelViewSet):
             if channel.channel_type == Channel.TYPE_EBAY:
                 from .sync import import_ebay_orders
                 stats = import_ebay_orders(channel, user=request.user)
+            elif channel.channel_type == Channel.TYPE_AMAZON:
+                from .sync import import_amazon_orders
+                stats = import_amazon_orders(channel, user=request.user)
             else:
                 from .sync import import_woocommerce_orders
                 stats = import_woocommerce_orders(channel, user=request.user)
@@ -299,21 +321,39 @@ class ChannelViewSet(viewsets.ModelViewSet):
             if channel.channel_type == Channel.TYPE_EBAY:
                 from .sync import push_stock_to_ebay
                 stats = push_stock_to_ebay(channel, dry_run=dry_run)
+            elif channel.channel_type == Channel.TYPE_AMAZON:
+                from .sync import push_stock_to_amazon
+                stats = push_stock_to_amazon(channel, dry_run=dry_run)
             else:
                 from .sync import push_stock_to_woocommerce
                 stats = push_stock_to_woocommerce(channel)
 
             if dry_run:
+                is_ebay = channel.channel_type == Channel.TYPE_EBAY
+                is_amazon = channel.channel_type == Channel.TYPE_AMAZON
+                if is_ebay:
+                    sku_label = 'eBay SKU'
+                    sku_key = 'ebay_sku'
+                    platform = 'eBay'
+                elif is_amazon:
+                    sku_label = 'Seller SKU'
+                    sku_key = 'amazon_sku'
+                    platform = 'Amazon'
+                else:
+                    sku_label = 'SKU'
+                    sku_key = 'external_sku'
+                    platform = channel.channel_type
+
                 preview_lines = [
-                    f"  {p['erp_sku']} → eBay SKU {p['ebay_sku']} qty={p['qty']}"
+                    f"  {p['erp_sku']} → {sku_label} {p[sku_key]} qty={p['qty']}"
                     for p in stats.get('preview', [])
-                ] or ['  (no confirmed active mappings with an eBay inventory SKU)']
+                ] or [f'  (no confirmed active mappings with a {sku_label} set)']
                 msg = (
                     f"DRY RUN — {stats['success']} listing(s) would be updated:\n"
                     + '\n'.join(preview_lines)
-                    + (f"\n{stats['skipped']} skipped (no external_sku set)." if stats['skipped'] else '')
+                    + (f"\n{stats['skipped']} skipped (no external_sku set)." if stats.get('skipped') else '')
                     + (f"\n{stats['not_confirmed']} mappings awaiting activation." if stats.get('not_confirmed') else '')
-                    + '\nNo changes were made to eBay.'
+                    + f'\nNo changes were made to {platform}.'
                 )
                 log.status = 'completed'
                 log.message = msg
@@ -328,20 +368,21 @@ class ChannelViewSet(viewsets.ModelViewSet):
             if stats.get('legacy'):
                 parts.append(f"{stats['legacy']} legacy listing(s) skipped (not in Inventory API)")
             if stats.get('skipped'):
-                parts.append(f"{stats['skipped']} skipped (no eBay inventory SKU set)")
+                parts.append(f"{stats['skipped']} skipped (no inventory SKU set)")
             if stats.get('not_confirmed'):
                 parts.append(
                     f"{stats['not_confirmed']} awaiting SKU confirmation (activate in SKU Mapping tab)"
                 )
             msg = "Stock: " + ", ".join(parts) + "."
 
-            # Append detailed error list if any failures
             errors = stats.get('errors', [])
             if errors:
                 error_lines = []
-                for e in errors[:20]:  # cap at 20 to keep log readable
+                for e in errors[:20]:
                     prefix = '[LEGACY] ' if e.get('legacy') else '[ERROR] '
-                    error_lines.append(f"  {prefix}{e['erp_sku']} (eBay: {e['ebay_sku']}): {e['error']}")
+                    sku_key = 'ebay_sku' if 'ebay_sku' in e else 'amazon_sku'
+                    ext_sku = e.get(sku_key, e.get('external_sku', ''))
+                    error_lines.append(f"  {prefix}{e['erp_sku']} ({sku_key}: {ext_sku}): {e['error']}")
                 msg += '\n\nDetails:\n' + '\n'.join(error_lines)
                 if len(errors) > 20:
                     msg += f'\n  … and {len(errors) - 20} more.'
@@ -410,6 +451,23 @@ class ChannelViewSet(viewsets.ModelViewSet):
                     message=(
                         f"eBay: Pushed tracking {result['tracking']} "
                         f"(carrier: {result.get('carrier', 'OTHER')}) to order {result.get('order_id')}."
+                    ),
+                )
+                return Response({'ok': True, 'message': log.message})
+        elif channel.channel_type == Channel.TYPE_AMAZON:
+            from .sync import push_tracking_to_amazon
+            result = push_tracking_to_amazon(
+                channel, so,
+                tracking_number=request.data.get('tracking_number') or None,
+                courier_override=request.data.get('courier') or None,
+            )
+            if result['success']:
+                _complete_log(
+                    log,
+                    records_updated=1,
+                    message=(
+                        f"Amazon: Pushed tracking {result['tracking']} "
+                        f"(carrier: {result.get('carrier', 'Other')}) to order {result.get('order_id')}."
                     ),
                 )
                 return Response({'ok': True, 'message': log.message})

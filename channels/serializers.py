@@ -114,5 +114,15 @@ class ChannelSerializer(serializers.ModelSerializer):
                 'is_configured': bool(app_id and has_token),
             }
         if obj.channel_type == 'amazon':
-            return {'is_configured': bool(creds.get('seller_id'))}
+            seller_id = creds.get('seller_id', '')
+            lwa_client_id = creds.get('lwa_client_id', '')
+            has_refresh = bool(creds.get('refresh_token'))
+            marketplace_id = creds.get('marketplace_id', 'A1F83G8C2ARO7P')
+            return {
+                'seller_id_hint': (seller_id[:6] + '…') if len(seller_id) > 6 else seller_id,
+                'lwa_client_id_hint': (lwa_client_id[:12] + '…') if len(lwa_client_id) > 12 else lwa_client_id,
+                'has_refresh_token': has_refresh,
+                'marketplace_id': marketplace_id,
+                'is_configured': bool(seller_id and lwa_client_id and has_refresh),
+            }
         return {'is_configured': bool(creds)}
