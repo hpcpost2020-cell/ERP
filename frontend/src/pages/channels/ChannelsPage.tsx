@@ -54,7 +54,7 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
   const [name, setName] = useState('')
   const [channelType, setChannelType] = useState('woocommerce')
   const [storeUrl, setStoreUrl] = useState('')
@@ -63,10 +63,13 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
+  const needsWcCreds = channelType === 'woocommerce'
+  const credentialsOnDetailPage = channelType === 'amazon' || channelType === 'ebay'
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) { setErr('Channel name is required'); return }
-    if (channelType === 'woocommerce') {
+    if (needsWcCreds) {
       if (!storeUrl.trim()) { setErr('Store URL is required'); return }
       if (!consumerKey.trim()) { setErr('Consumer Key is required'); return }
       if (!consumerSecret.trim()) { setErr('Consumer Secret is required'); return }
@@ -75,13 +78,13 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
     setErr('')
     try {
       const creds: Record<string, string> = {}
-      if (channelType === 'woocommerce') {
+      if (needsWcCreds) {
         creds.store_url = storeUrl.trim()
         creds.consumer_key = consumerKey.trim()
         creds.consumer_secret = consumerSecret.trim()
       }
-      await channelsApi.create({ name: name.trim(), channel_type: channelType, api_credentials: creds })
-      onCreated()
+      const res = await channelsApi.create({ name: name.trim(), channel_type: channelType, api_credentials: creds })
+      onCreated(res.data.id)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create channel'
       setErr(msg)
@@ -100,7 +103,7 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <label className="block text-sm font-medium text-gray-700 mb-1">Channel Name *</label>
             <input
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My WooCommerce Store"
+              value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My Amazon UK Store"
             />
           </div>
 
@@ -111,13 +114,13 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
               value={channelType} onChange={e => setChannelType(e.target.value)}
             >
               <option value="woocommerce">WooCommerce</option>
-              <option value="ebay" disabled>eBay (coming soon)</option>
-              <option value="amazon" disabled>Amazon SP-API (coming soon)</option>
+              <option value="ebay">eBay</option>
+              <option value="amazon">Amazon SP-API</option>
               <option value="direct">Direct / Manual</option>
             </select>
           </div>
 
-          {channelType === 'woocommerce' && (
+          {needsWcCreds && (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Store URL *</label>
@@ -152,6 +155,12 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
             </>
           )}
 
+          {credentialsOnDetailPage && (
+            <p className="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+              After creating the channel you'll be taken to its settings page to enter credentials.
+            </p>
+          )}
+
           {err && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{err}</p>}
 
           <div className="flex gap-3 pt-2">
@@ -161,7 +170,7 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'Creating…' : 'Create Channel'}
+              {saving ? 'Creating…' : credentialsOnDetailPage ? 'Create & Configure →' : 'Create Channel'}
             </button>
           </div>
         </form>
@@ -233,12 +242,6 @@ export default function ChannelsPage() {
         </button>
       </div>
 
-      {/* Info banner for WC setup */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-        <strong>WooCommerce setup:</strong> In WooCommerce → Settings → Advanced → REST API, create a key with
-        <strong> Read/Write</strong> permissions. Your store must use <strong>HTTPS</strong>.
-      </div>
-
       {isLoading && (
         <div className="text-center py-12 text-gray-400">Loading channels…</div>
       )}
@@ -247,7 +250,7 @@ export default function ChannelsPage() {
         <div className="text-center py-16 space-y-4">
           <Zap className="w-12 h-12 text-gray-300 mx-auto" />
           <p className="text-gray-500 font-semibold text-lg">No channels configured</p>
-          <p className="text-gray-400 text-sm">Add your WooCommerce store to start syncing orders and stock.</p>
+          <p className="text-gray-400 text-sm">Add a WooCommerce, Amazon, or eBay channel to start syncing orders and stock.</p>
           <button
             onClick={() => setShowAdd(true)}
             className="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
@@ -358,9 +361,10 @@ export default function ChannelsPage() {
       {showAdd && (
         <AddChannelModal
           onClose={() => setShowAdd(false)}
-          onCreated={() => {
+          onCreated={(id) => {
             setShowAdd(false)
             qc.invalidateQueries({ queryKey: ['channels'] })
+            nav(`/channels/${id}`)
           }}
         />
       )}

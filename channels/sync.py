@@ -1051,23 +1051,17 @@ def _import_single_amazon_order(channel, order: dict, client, user) -> str:
             product = _match_product(seller_sku, 'amazon') if seller_sku else None
 
             if product and seller_sku:
-                ChannelListing_mod = None
-                try:
-                    from products.models import ChannelListing
-                    ChannelListing_mod = ChannelListing
-                except ImportError:
-                    pass
-                if ChannelListing_mod:
-                    ChannelListing_mod.objects.get_or_create(
-                        product=product,
-                        channel='amazon',
-                        external_id=asin or seller_sku,
-                        defaults={
-                            'external_sku': seller_sku,
-                            'parent_id': '',
-                            'is_active': False,
-                        },
-                    )
+                from products.models import ChannelListing
+                ChannelListing.objects.get_or_create(
+                    product=product,
+                    channel='amazon',
+                    external_id=asin or seller_sku,
+                    defaults={
+                        'external_sku': seller_sku,
+                        'parent_id': '',
+                        'is_active': False,
+                    },
+                )
 
             fallback_sku = seller_sku or (f'AMZN-{asin}' if asin else f'AMZN-{order_item_id}')
 

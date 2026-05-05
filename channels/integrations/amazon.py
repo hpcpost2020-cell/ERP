@@ -99,11 +99,14 @@ class AmazonClient:
         return Marketplaces.GB
 
     def _wrap(self, exc):
-        """Convert SellingApiException → AmazonError."""
+        """Convert SellingApiException → AmazonError with a readable message."""
         from sp_api.base import SellingApiException
         if isinstance(exc, SellingApiException):
-            code = getattr(exc, 'code', None)
-            return AmazonError(str(exc), status_code=code)
+            # SellingApiException stores the useful info in .message/.amzn_code,
+            # not via super().__init__(), so str(exc) is empty.
+            code = getattr(exc, 'amzn_code', None)
+            msg = getattr(exc, 'message', None) or repr(getattr(exc, 'error', exc)) or 'SP-API error'
+            return AmazonError(msg, status_code=code)
         return AmazonError(str(exc))
 
     # ── Test connection ───────────────────────────────────────────────────────
