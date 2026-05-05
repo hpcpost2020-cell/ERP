@@ -80,6 +80,7 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
         creds.consumer_key = consumerKey.trim()
         creds.consumer_secret = consumerSecret.trim()
       }
+      // Amazon and eBay: credentials entered on the channel detail page after creation
       await channelsApi.create({ name: name.trim(), channel_type: channelType, api_credentials: creds })
       onCreated()
     } catch (e: unknown) {
@@ -111,8 +112,8 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
               value={channelType} onChange={e => setChannelType(e.target.value)}
             >
               <option value="woocommerce">WooCommerce</option>
-              <option value="ebay" disabled>eBay (coming soon)</option>
-              <option value="amazon" disabled>Amazon SP-API (coming soon)</option>
+              <option value="ebay">eBay</option>
+              <option value="amazon">Amazon SP-API</option>
               <option value="direct">Direct / Manual</option>
             </select>
           </div>
