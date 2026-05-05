@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { channels as channelsApi } from '../../api/endpoints'
 import {
@@ -630,10 +630,12 @@ function AmazonGuideTab({ cs, channel, onGotoTab }: {
 export default function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const channelId = Number(id)
 
-  const [tab, setTab] = useState<Tab>('overview')
+  const initialTab = (location.state as { tab?: Tab } | null)?.tab ?? 'overview'
+  const [tab, setTab] = useState<Tab>(initialTab)
 
   // WooCommerce credentials form state
   const [storeUrl, setStoreUrl] = useState('')

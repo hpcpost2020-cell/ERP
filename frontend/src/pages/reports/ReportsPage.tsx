@@ -11,7 +11,7 @@ import { format, parseISO } from 'date-fns'
 type Tab = 'sales' | 'channels' | 'products' | 'profit' | 'customers' | 'low-stock' | 'open-pos' | 'returns'
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'sales', label: 'Daily Sales', icon: TrendingUp },
-  { key: 'channels', label: 'Channels', icon: BarChart3 },
+  { key: 'channels', label: 'Channel Performance', icon: BarChart3 },
   { key: 'products', label: 'Products', icon: Package },
   { key: 'profit', label: 'Profit', icon: TrendingUp },
   { key: 'customers', label: 'Customers', icon: Users },

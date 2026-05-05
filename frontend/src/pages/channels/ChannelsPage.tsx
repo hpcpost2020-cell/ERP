@@ -54,9 +54,9 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
   const [name, setName] = useState('')
-  const [channelType, setChannelType] = useState('woocommerce')
+  const [channelType, setChannelType] = useState('amazon')
   const [storeUrl, setStoreUrl] = useState('')
   const [consumerKey, setConsumerKey] = useState('')
   const [consumerSecret, setConsumerSecret] = useState('')
@@ -81,8 +81,8 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
         creds.consumer_secret = consumerSecret.trim()
       }
       // Amazon and eBay: credentials entered on the channel detail page after creation
-      await channelsApi.create({ name: name.trim(), channel_type: channelType, api_credentials: creds })
-      onCreated()
+      const res = await channelsApi.create({ name: name.trim(), channel_type: channelType, api_credentials: creds })
+      onCreated(res.data.id)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to create channel'
       setErr(msg)
@@ -94,28 +94,39 @@ function AddChannelModal({ onClose, onCreated }: { onClose: () => void; onCreate
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-5">
-        <h2 className="text-lg font-bold text-gray-900">Add Channel</h2>
+        <div className="flex items-center gap-3 pb-2 border-b border-gray-100">
+          <Globe className="w-6 h-6 text-blue-600" />
+          <h2 className="text-lg font-bold text-gray-900">Add Sales Channel</h2>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Channel Name *</label>
-            <input
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My WooCommerce Store"
-            />
-          </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Channel Type *</label>
             <select
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
               value={channelType} onChange={e => setChannelType(e.target.value)}
             >
-              <option value="woocommerce">WooCommerce</option>
-              <option value="ebay">eBay</option>
               <option value="amazon">Amazon SP-API</option>
+              <option value="ebay">eBay</option>
+              <option value="woocommerce">WooCommerce</option>
               <option value="direct">Direct / Manual</option>
             </select>
+          </div>
+
+          {(channelType === 'amazon' || channelType === 'ebay') && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+              Enter a name below, then click <strong>Create Channel</strong>.
+              SP-API credentials (Seller ID, LWA Client ID, etc.) are entered on the <strong>Credentials tab</strong> after creation.
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Channel Name *</label>
+            <input
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={name} onChange={e => setName(e.target.value)}
+              placeholder={channelType === 'amazon' ? 'e.g. Amazon UK' : channelType === 'ebay' ? 'e.g. eBay UK' : 'e.g. My Store'}
+            />
           </div>
 
           {channelType === 'woocommerce' && (
@@ -220,24 +231,21 @@ export default function ChannelsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sales Channels</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage marketplace integrations and sync settings</p>
+      {/* ── Page identity — large unmistakable heading ─────────────────────── */}
+      <div className="bg-gray-900 text-white rounded-2xl px-8 py-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Globe className="w-10 h-10 text-blue-400" />
+          <div>
+            <h1 className="text-3xl font-black tracking-tight uppercase">Sales Channels</h1>
+            <p className="text-gray-400 text-sm mt-0.5">Amazon SP-API · eBay · WooCommerce · Connect your marketplaces</p>
+          </div>
         </div>
         <button
           onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
+          className="flex items-center gap-2 bg-blue-500 hover:bg-blue-400 text-white px-5 py-3 rounded-xl text-sm font-bold transition-colors"
         >
-          <Plus className="w-4 h-4" /> Add Channel
+          <Plus className="w-5 h-5" /> Add Channel
         </button>
-      </div>
-
-      {/* Info banner for WC setup */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-        <strong>WooCommerce setup:</strong> In WooCommerce → Settings → Advanced → REST API, create a key with
-        <strong> Read/Write</strong> permissions. Your store must use <strong>HTTPS</strong>.
       </div>
 
       {isLoading && (
@@ -245,15 +253,17 @@ export default function ChannelsPage() {
       )}
 
       {!isLoading && channelList.length === 0 && (
-        <div className="text-center py-16 space-y-4">
-          <Zap className="w-12 h-12 text-gray-300 mx-auto" />
-          <p className="text-gray-500 font-semibold text-lg">No channels configured</p>
-          <p className="text-gray-400 text-sm">Add your WooCommerce store to start syncing orders and stock.</p>
+        <div className="bg-white border-2 border-dashed border-gray-200 rounded-2xl text-center py-16 space-y-4">
+          <Zap className="w-14 h-14 text-gray-300 mx-auto" />
+          <p className="text-gray-700 font-bold text-xl">No channels connected yet</p>
+          <p className="text-gray-400 text-sm max-w-md mx-auto">
+            Connect <strong>Amazon SP-API</strong>, <strong>eBay</strong>, or <strong>WooCommerce</strong> to sync orders and push stock levels automatically.
+          </p>
           <button
             onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
+            className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold hover:bg-blue-700"
           >
-            <Plus className="w-4 h-4" /> Add your first channel
+            <Plus className="w-5 h-5" /> Add your first channel
           </button>
         </div>
       )}
@@ -359,9 +369,10 @@ export default function ChannelsPage() {
       {showAdd && (
         <AddChannelModal
           onClose={() => setShowAdd(false)}
-          onCreated={() => {
+          onCreated={(id: number) => {
             setShowAdd(false)
             qc.invalidateQueries({ queryKey: ['channels'] })
+            nav(`/channels/${id}`, { state: { tab: 'credentials' } })
           }}
         />
       )}

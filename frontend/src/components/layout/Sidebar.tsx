@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext'
 
 const nav = [
   { label: 'Dashboard', to: '/', icon: LayoutDashboard },
+  { label: 'Sales Channels', to: '/channels', icon: Globe, highlight: true },
   { divider: 'Operations' },
   { label: 'Sales Orders', to: '/sales', icon: ShoppingCart },
   { label: 'Purchase Orders', to: '/purchasing', icon: Truck },
@@ -30,7 +31,7 @@ const nav = [
   { label: 'Suppliers', to: '/suppliers', icon: Building2 },
   { label: 'Invoices', to: '/invoicing', icon: FileText },
   { divider: 'Integrations' },
-  { label: 'Sales Channels', to: '/channels', icon: Globe },
+  { label: 'Sales Channels', to: '/channels', icon: Globe, highlight: true },
   { divider: 'Analytics' },
   { label: 'Reports', to: '/reports', icon: BarChart3 },
   { divider: 'System' },
